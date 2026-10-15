@@ -1496,18 +1496,18 @@
                     <div class="toolbar-separator"></div>
 
                     <!-- Załączniki i aparat -->
-                    <button type="button" class="toolbar-tool-btn" @onclick="CaptureWhiteboardPhotoAsync" title="Zrób zdjęcie tablicy aparatem">
+                    <button type="button" class="toolbar-tool-btn" onmousedown="window.notesEditor.saveSelection();" @onclick="CaptureWhiteboardPhotoAsync" title="Zrób zdjęcie tablicy aparatem">
                         📷
                     </button>
-                    <button type="button" class="toolbar-tool-btn" @onclick="PickWhiteboardPhotoAsync" title="Dodaj zdjęcie z galerii">
+                    <button type="button" class="toolbar-tool-btn" onmousedown="window.notesEditor.saveSelection();" @onclick="PickWhiteboardPhotoAsync" title="Dodaj zdjęcie z galerii">
                         🖼️
                     </button>
-                    <button type="button" class="toolbar-tool-btn" @onclick="PickDocumentAsync" title="Załącz dokument PDF">
+                    <button type="button" class="toolbar-tool-btn" onmousedown="window.notesEditor.saveSelection();" @onclick="PickDocumentAsync" title="Załącz dokument PDF">
                         📎
                     </button>
-                        <button type="button" class="toolbar-tool-btn desktop-only-btn" @onclick="StartRemoteCameraSessionAsync" title="Aparat zdalny: Zrób zdjęcie telefonem">
-                            📱 Z telefonu
-                        </button>
+                    <button type="button" class="toolbar-tool-btn desktop-only-btn" onmousedown="window.notesEditor.saveSelection();" @onclick="StartRemoteCameraSessionAsync" title="Aparat zdalny: Zrób zdjęcie telefonem (Skrót: Cmd+Shift+C)">
+                        📱 Z telefonu
+                    </button>
                 </div>
             </div>
 
@@ -1966,12 +1966,12 @@
                     await JS.InvokeVoidAsync("notesEditor.init", editorElementRef, dotNetHelper, activeNote.Id.ToString());
                     isJsInitialized = true;
                     lastLoadedNoteId = activeNote.Id;
-                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "", activeNote.Id.ToString());
+                    await UpdateEditorContentAsync();
                 }
                 else if (lastLoadedNoteId != activeNote.Id)
                 {
                     lastLoadedNoteId = activeNote.Id;
-                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "", activeNote.Id.ToString());
+                    await UpdateEditorContentAsync();
                 }
             }
             catch (Exception ex)
@@ -2198,6 +2198,49 @@
                 SyncNoteIfCloudEnabled(note);
             }
         }
+    }
+
+    [JSInvokable]
+    public async Task OnClipboardImagePasted(string dataUriOrBase64, string contentType, string fileName)
+    {
+        if (activeNote == null) return;
+        try
+        {
+            var base64 = dataUriOrBase64;
+            if (base64.Contains(",")) base64 = base64.Substring(base64.IndexOf(",") + 1);
+            var bytes = Convert.FromBase64String(base64);
+
+            string? dataUri = null;
+            string? attachmentId = null;
+
+            await Task.Run(async () =>
+            {
+                using var ms = new MemoryStream(bytes);
+                var savedAtt = await NoteService.AddAttachmentAsync(activeNote.Id, ms, fileName, contentType);
+                if (savedAtt != null && !string.IsNullOrEmpty(savedAtt.LocalPath))
+                {
+                    attachmentId = savedAtt.Id;
+                    dataUri = await NoteService.GetAttachmentDataUriAsync(savedAtt.LocalPath, savedAtt.ContentType);
+                }
+            });
+
+            if (!string.IsNullOrEmpty(dataUri) && !string.IsNullOrEmpty(attachmentId))
+            {
+                await JS.InvokeVoidAsync("notesEditor.insertInlineImage", attachmentId, dataUri, fileName);
+            }
+            await LoadThumbnailsForActiveNoteAsync();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] OnClipboardImagePasted error: {ex.Message}");
+        }
+    }
+
+    [JSInvokable]
+    public async Task TriggerRemoteCameraShortcut()
+    {
+        await InvokeAsync(StartRemoteCameraSessionAsync);
     }
 
     private void OnNoteTitleChanged()
@@ -2839,8 +2882,15 @@
             }
             else
             {
-                if (wifiServer != null) wifiServer.IsAcceptingPhotos = false;
-                await FirebaseService.SetPermanentRemoteCameraStandbyAsync(album, noteId, noteTitle, endpoint, authToken);
+                if (wifiServer != null) wifiServer.IsAcceptingPhotos = (activeNote != null);
+                if (activeNote != null)
+                {
+                    await FirebaseService.SetPermanentRemoteCameraReadyAsync(album, noteId, noteTitle, endpoint, authToken);
+                }
+                else
+                {
+                    await FirebaseService.SetPermanentRemoteCameraStandbyAsync(album, noteId, noteTitle, endpoint, authToken);
+                }
             }
         }
         catch (Exception ex)
@@ -2882,13 +2932,25 @@
                     await InvokeAsync(async () =>
                     {
                         await JS.InvokeVoidAsync("notesEditor.insertInlineImage", attachmentId, dataUri, fileName);
-                        showRemoteCameraModal = false;
                         isCameraWaiting = false;
-                        cameraPollTimer?.Stop();
-                        if (wifiServer != null) wifiServer.IsAcceptingPhotos = false;
+                        if (wifiServer != null) wifiServer.IsAcceptingPhotos = (activeNote != null);
                         await BroadcastCameraStateAsync();
                         StateHasChanged();
                     });
+
+                    // Zresetuj zdjęcie w Firebase, aby umożliwić przesyłanie kolejnych zdjęć
+                    var alb = GetCurrentStudentAlbum();
+                    if (!string.IsNullOrWhiteSpace(alb))
+                    {
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                await FirebaseService.ClearRemoteCameraPhotoAsync(alb, FirebaseService.PermanentCameraSessionId);
+                            }
+                            catch {}
+                        });
+                    }
                 }
             }
         }
@@ -2925,7 +2987,6 @@
             var session = await FirebaseService.GetPermanentRemoteCameraSessionAsync(album);
             if (session != null && session.Status == "uploaded" && !string.IsNullOrWhiteSpace(session.PhotoDataBase64))
             {
-                cameraPollTimer?.Stop();
                 isCameraWaiting = false;
 
                 var bytes = Convert.FromBase64String(session.PhotoDataBase64);
@@ -2946,7 +3007,7 @@
         cameraPollTimer = null;
         showRemoteCameraModal = false;
         isCameraWaiting = false;
-        if (wifiServer != null) wifiServer.IsAcceptingPhotos = false;
+        if (wifiServer != null) wifiServer.IsAcceptingPhotos = (activeNote != null);
         _ = BroadcastCameraStateAsync();
         StateHasChanged();
     }

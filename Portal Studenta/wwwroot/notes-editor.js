@@ -16,6 +16,20 @@ window.notesEditor = {
     currentDotNetHelper: null,
     editorEl: null,
     currentNoteId: null,
+    savedRange: null,
+
+    /**
+     * Saves the current active selection range inside the editor.
+     */
+    saveSelection: function () {
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount > 0 && this.editorEl) {
+            var r = sel.getRangeAt(0);
+            if (this.editorEl.contains(r.commonAncestorContainer)) {
+                this.savedRange = r.cloneRange();
+            }
+        }
+    },
 
     /**
      * Sanitizes editor HTML before serializing to SQLite storage.
@@ -74,15 +88,59 @@ window.notesEditor = {
             }, 500);
         };
 
-        // Aktualizacja stanów przycisków paska narzędzi przy zmianie zaznaczenia kursora
+        // Aktualizacja stanów przycisków paska narzędzi i utrwalanie pozycji kursora
         document.addEventListener('selectionchange', function () {
             self.updateToolbarStates();
+            self.saveSelection();
+        });
+
+        editorEl.addEventListener('mouseup', function () { self.saveSelection(); });
+        editorEl.addEventListener('keyup', function () { self.saveSelection(); });
+        editorEl.addEventListener('blur', function () { self.saveSelection(); });
+        editorEl.addEventListener('touchend', function () { self.saveSelection(); });
+
+        // Wklejanie ze schowka (obsługa wklejania obrazów przez Cmd+V / Ctrl+V)
+        editorEl.addEventListener('paste', function (e) {
+            var clipboardData = e.clipboardData || window.clipboardData;
+            if (!clipboardData) return;
+
+            var items = clipboardData.items;
+            if (items) {
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].type && items[i].type.indexOf('image/') === 0) {
+                        var file = items[i].getAsFile();
+                        if (file) {
+                            e.preventDefault();
+                            self.saveSelection();
+                            var reader = new FileReader();
+                            reader.onload = function (evt) {
+                                var base64 = evt.target.result;
+                                if (self.currentDotNetHelper) {
+                                    self.currentDotNetHelper.invokeMethodAsync('OnClipboardImagePasted', base64, file.type, file.name || 'wklejony_obraz.png');
+                                }
+                            };
+                            reader.readAsDataURL(file);
+                            return;
+                        }
+                    }
+                }
+            }
         });
 
         // Obsługa klawiszy (Enter w checklistach, Tab w blokach kodu, skróty Cmd/Ctrl)
         editorEl.onkeydown = function (e) {
             var isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
             var modKey = isMac ? e.metaKey : e.ctrlKey;
+
+            // Skrót aparatu zdalnego (Cmd+Shift+C lub Cmd+Shift+P)
+            if (modKey && e.shiftKey && (e.key === 'c' || e.key === 'C' || e.key === 'p' || e.key === 'P')) {
+                e.preventDefault();
+                self.saveSelection();
+                if (self.currentDotNetHelper) {
+                    self.currentDotNetHelper.invokeMethodAsync('TriggerRemoteCameraShortcut');
+                }
+                return;
+            }
 
             // Klawisze skrótów formatowania (Cmd+B, Cmd+I, Cmd+U)
             if (modKey && !e.shiftKey && !e.altKey) {
@@ -276,20 +334,65 @@ window.notesEditor = {
 
     /**
      * Inserts an inline image with data-attachment-id token.
+     * Uses robust DOM element creation and saved selection ranges
+     * to avoid focus loss or silent failures of deprecated document.execCommand.
      */
     insertInlineImage: function (attachmentId, dataUri, altText) {
         if (!this.editorEl) return;
         this.editorEl.focus();
 
         var alt = altText || 'Zdjęcie tablicy';
-        var imgHtml = '<p><img data-attachment-id="' + attachmentId + '" src="' + dataUri + '" class="note-inline-image" alt="' + alt + '" /></p><p><br></p>';
+        var p = document.createElement('p');
+        var img = document.createElement('img');
+        img.setAttribute('data-attachment-id', attachmentId);
+        img.setAttribute('src', dataUri);
+        img.className = 'note-inline-image';
+        img.alt = alt;
+        p.appendChild(img);
+
+        var pSpacing = document.createElement('p');
+        pSpacing.innerHTML = '<br>';
 
         var sel = window.getSelection();
-        if (sel && sel.rangeCount > 0 && this.editorEl.contains(sel.anchorNode)) {
-            document.execCommand('insertHTML', false, imgHtml);
-        } else {
-            this.editorEl.innerHTML += imgHtml;
+        var rangeToUse = null;
+
+        if (this.savedRange && this.editorEl.contains(this.savedRange.commonAncestorContainer)) {
+            rangeToUse = this.savedRange;
+        } else if (sel && sel.rangeCount > 0 && this.editorEl.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+            rangeToUse = sel.getRangeAt(0);
         }
+
+        if (rangeToUse) {
+            rangeToUse.deleteContents();
+            rangeToUse.insertNode(pSpacing);
+            rangeToUse.insertNode(p);
+
+            // Ustaw kursor w nowo utworzonym akapicie poniżej zdjęcia
+            var newRange = document.createRange();
+            newRange.selectNodeContents(pSpacing);
+            newRange.collapse(false);
+            if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(newRange);
+            }
+            this.savedRange = newRange.cloneRange();
+        } else {
+            this.editorEl.appendChild(p);
+            this.editorEl.appendChild(pSpacing);
+
+            var endRange = document.createRange();
+            endRange.selectNodeContents(pSpacing);
+            endRange.collapse(false);
+            if (sel) {
+                sel.removeAllRanges();
+                sel.addRange(endRange);
+            }
+            this.savedRange = endRange.cloneRange();
+        }
+
+        try {
+            img.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } catch (e) {}
 
         this.notifyContentChanged();
     },

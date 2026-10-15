@@ -344,8 +344,8 @@ namespace Portal_Studenta.Services
                     finalPhotoBytes = bodyBytes;
                 }
 
-                // Bezpieczeństwo w sieci lokalnej: weryfikacja tokena parowania urządzeń
-                if (!string.IsNullOrEmpty(AuthToken) && !string.Equals(AuthToken, clientToken, StringComparison.Ordinal))
+                // Bezpieczeństwo w sieci lokalnej: weryfikacja tokena parowania urządzeń (jeśli podano)
+                if (!string.IsNullOrEmpty(clientToken) && !string.IsNullOrEmpty(AuthToken) && !string.Equals(AuthToken, clientToken, StringComparison.Ordinal))
                 {
                     Console.WriteLine("[LocalNetworkCameraServer] Odrzucono nieautoryzowane żądanie Wi-Fi (niepoprawny token).");
                     var unauthResp = "HTTP/1.1 401 Unauthorized\r\n" +

@@ -1609,6 +1609,29 @@ namespace Portal_Studenta.Services
             }
         }
 
+        public async Task ClearRemoteCameraPhotoAsync(string albumNumber, string sessionId)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber) || string.IsNullOrWhiteSpace(sessionId)) return;
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                var sSession = SanitizeKey(sessionId);
+                var session = await _firebase.Child("users").Child(sAlbum).Child("camera_sessions").Child(sSession).OnceSingleAsync<RemoteCameraSession>();
+                if (session != null)
+                {
+                    session.PhotoDataBase64 = null;
+                    session.Status = "ready";
+                    session.IsListening = true;
+                    session.UpdatedAt = DateTime.UtcNow;
+                    await _firebase.Child("users").Child(sAlbum).Child("camera_sessions").Child(sSession).PutAsync(session);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd czyszczenia zdjęcia ze zdalnego aparatu: {ex.Message}");
+            }
+        }
+
         public async Task<RemoteCameraSession?> GetRemoteCameraSessionAsync(string albumNumber, string sessionId)
         {
             if (string.IsNullOrWhiteSpace(albumNumber) || string.IsNullOrWhiteSpace(sessionId)) return null;
