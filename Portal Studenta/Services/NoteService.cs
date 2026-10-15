@@ -175,9 +175,10 @@ namespace Portal_Studenta.Services
 
         public void DeleteNote(Guid id)
         {
+            Note? note;
             lock (_notes)
             {
-                var note = _notes.FirstOrDefault(n => n.Id == id);
+                note = _notes.FirstOrDefault(n => n.Id == id);
                 if (note != null) _notes.Remove(note);
             }
 
@@ -185,6 +186,8 @@ namespace Portal_Studenta.Services
             {
                 try
                 {
+                    DeleteAttachmentFiles(note);
+                    await EnsureInitializedAsync();
                     if (_db != null)
                     {
                         await _dbLock.WaitAsync();
@@ -233,12 +236,16 @@ namespace Portal_Studenta.Services
         /// </summary>
         public async Task DeleteNoteAsync(Guid id)
         {
+            Note? n;
             lock (_notes)
             {
-                var n = _notes.FirstOrDefault(x => x.Id == id);
+                n = _notes.FirstOrDefault(x => x.Id == id);
                 if (n != null) _notes.Remove(n);
             }
 
+            DeleteAttachmentFiles(n);
+
+            await EnsureInitializedAsync();
             if (_db != null)
             {
                 await _dbLock.WaitAsync();
@@ -253,6 +260,29 @@ namespace Portal_Studenta.Services
             }
 
             OnNotesChanged?.Invoke();
+        }
+
+        private static void DeleteAttachmentFiles(Note? note)
+        {
+            if (note?.Attachments == null) return;
+            foreach (var att in note.Attachments)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(att.LocalPath) && File.Exists(att.LocalPath))
+                    {
+                        File.Delete(att.LocalPath);
+                    }
+                    if (!string.IsNullOrEmpty(att.ThumbnailPath) && File.Exists(att.ThumbnailPath))
+                    {
+                        File.Delete(att.ThumbnailPath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[NoteService] Error deleting attachment file: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>

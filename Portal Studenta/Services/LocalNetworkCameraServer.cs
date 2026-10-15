@@ -306,8 +306,7 @@ namespace Portal_Studenta.Services
                 // Sprawdź czy body to JSON z base64
                 try
                 {
-                    var jsonStr = Encoding.UTF8.GetString(bodyBytes);
-                    using var doc = JsonDocument.Parse(jsonStr);
+                    using var doc = JsonDocument.Parse(bodyBytes);
                     if (doc.RootElement.TryGetProperty("token", out var tokProp))
                     {
                         clientToken = tokProp.GetString();
@@ -374,7 +373,7 @@ namespace Portal_Studenta.Services
 
             try
             {
-                using var httpClient = new HttpClient { Timeout = TimeSpan.FromMilliseconds(2200) };
+                using var httpClient = new HttpClient { Timeout = TimeSpan.FromMilliseconds(5000) };
                 if (!string.IsNullOrEmpty(authToken))
                 {
                     httpClient.DefaultRequestHeaders.Add("X-Auth-Token", authToken);

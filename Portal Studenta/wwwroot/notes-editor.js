@@ -15,6 +15,7 @@ window.notesEditor = {
     debounceTimer: null,
     currentDotNetHelper: null,
     editorEl: null,
+    currentNoteId: null,
 
     /**
      * Sanitizes editor HTML before serializing to SQLite storage.
@@ -48,17 +49,20 @@ window.notesEditor = {
     notifyContentChanged: function () {
         if (this.currentDotNetHelper && this.editorEl) {
             var cleanHtml = this.getCleanContent();
-            this.currentDotNetHelper.invokeMethodAsync('OnEditorContentChanged', cleanHtml);
+            this.currentDotNetHelper.invokeMethodAsync('OnEditorContentChanged', this.currentNoteId || '', cleanHtml);
         }
     },
 
     /**
      * Initializes the editor event handlers, keyboard shortcuts, and selection monitors.
      */
-    init: function (editorEl, dotNetHelper) {
+    init: function (editorEl, dotNetHelper, noteId) {
         if (!editorEl) return;
         this.editorEl = editorEl;
         this.currentDotNetHelper = dotNetHelper;
+        if (noteId !== undefined && noteId !== null) {
+            this.currentNoteId = noteId;
+        }
 
         var self = this;
 
@@ -212,8 +216,12 @@ window.notesEditor = {
     /**
      * Sets HTML content and re-triggers code syntax formatting.
      */
-    setContent: function (editorEl, html) {
+    setContent: function (editorEl, html, noteId) {
         if (!editorEl) return;
+        clearTimeout(this.debounceTimer);
+        if (noteId !== undefined && noteId !== null) {
+            this.currentNoteId = noteId;
+        }
         if (editorEl.innerHTML !== (html || '')) {
             editorEl.innerHTML = html || '';
             this.highlightAllCodeBlocks();

@@ -1,6 +1,7 @@
 @page "/notes"
 @using Portal_Studenta.Models
 @using Portal_Studenta.Services
+@using System.Collections.Concurrent
 @inject NoteService NoteService
 @inject ScheduleService ScheduleService
 @inject FirebaseService FirebaseService
@@ -1689,7 +1690,8 @@
     private bool isJsInitialized = false;
     private Guid? lastLoadedNoteId = null;
 
-    private readonly Dictionary<string, string> _thumbnailCache = new();
+    private readonly ConcurrentDictionary<string, string> _thumbnailCache = new();
+    private CancellationTokenSource? _titleDebounceCts;
     private NoteAttachment? activeLightboxAttachment;
     private string lightboxImageUri = "";
 
@@ -1773,15 +1775,15 @@
             {
                 if (!isJsInitialized)
                 {
-                    await JS.InvokeVoidAsync("notesEditor.init", editorElementRef, dotNetHelper);
+                    await JS.InvokeVoidAsync("notesEditor.init", editorElementRef, dotNetHelper, activeNote.Id.ToString());
                     isJsInitialized = true;
                     lastLoadedNoteId = activeNote.Id;
-                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "");
+                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "", activeNote.Id.ToString());
                 }
                 else if (lastLoadedNoteId != activeNote.Id)
                 {
                     lastLoadedNoteId = activeNote.Id;
-                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "");
+                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "", activeNote.Id.ToString());
                 }
             }
             catch (Exception ex)
@@ -1847,6 +1849,17 @@
     {
         if (activeNote?.Id != note.Id)
         {
+            if (_titleDebounceCts != null)
+            {
+                _titleDebounceCts.Cancel();
+                _titleDebounceCts.Dispose();
+                _titleDebounceCts = null;
+                if (activeNote != null)
+                {
+                    _ = NoteService.SaveNoteAsync(activeNote);
+                }
+            }
+
             activeNote = note;
             lastLoadedNoteId = null;
             _ = UpdateEditorContentAsync();
@@ -1864,7 +1877,7 @@
             {
                 lastLoadedNoteId = activeNote.Id;
                 var displayHtml = await PrepareContentForEditorAsync(activeNote);
-                await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, displayHtml);
+                await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, displayHtml, activeNote.Id.ToString());
             }
             catch (Exception ex)
             {
@@ -1971,22 +1984,52 @@
     }
 
     [JSInvokable]
-    public async Task OnEditorContentChanged(string htmlContent)
+    public async Task OnEditorContentChanged(string noteId, string htmlContent)
     {
-        if (activeNote != null)
+        if (activeNote != null && activeNote.Id.ToString() == noteId)
         {
             activeNote.Content = htmlContent;
             await NoteService.SaveNoteAsync(activeNote);
         }
+        else if (Guid.TryParse(noteId, out var parsedId))
+        {
+            var note = NoteService.GetAllNotes().FirstOrDefault(n => n.Id == parsedId);
+            if (note != null)
+            {
+                note.Content = htmlContent;
+                await NoteService.SaveNoteAsync(note);
+            }
+        }
     }
 
-    private async Task OnNoteTitleChanged()
+    private void OnNoteTitleChanged()
     {
-        if (activeNote != null)
+        if (activeNote == null) return;
+
+        _titleDebounceCts?.Cancel();
+        _titleDebounceCts?.Dispose();
+        _titleDebounceCts = new CancellationTokenSource();
+        var token = _titleDebounceCts.Token;
+
+        _ = Task.Run(async () =>
         {
-            await NoteService.SaveNoteAsync(activeNote);
-            _ = BroadcastCameraStateAsync();
-        }
+            try
+            {
+                await Task.Delay(300, token);
+                if (token.IsCancellationRequested) return;
+
+                if (activeNote != null)
+                {
+                    await NoteService.SaveNoteAsync(activeNote);
+                    _ = BroadcastCameraStateAsync();
+                }
+            }
+            catch (TaskCanceledException) { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Notes] OnNoteTitleChanged error: {ex.Message}");
+            }
+        });
     }
 
     private async Task ExecFormat(string cmd, string? val = null)
@@ -2390,7 +2433,7 @@
         if (activeNote != null)
         {
             await NoteService.DeleteAttachmentAsync(activeNote.Id, att.Id);
-            _thumbnailCache.Remove(att.Id);
+            _thumbnailCache.TryRemove(att.Id, out _);
             StateHasChanged();
         }
     }
@@ -2915,9 +2958,9 @@
     private static string GetCleanSnippet(string? html)
     {
         if (string.IsNullOrWhiteSpace(html)) return "Brak dodatkowego tekstu";
-        // Bierzemy maksymalnie pierwsze 400 znaków HTML-a — snippet ma 1-2 linijki!
-        // Zapobiega to zamrażaniu CPU przez Regex przy dużych obrazach base64
-        var truncated = html.Length > 400 ? html.Substring(0, 400) : html;
+        // Usuń tagi obrazów lub wstaw ikonę, aby tekst po zdjęciu nie został ucięty
+        var stripped = System.Text.RegularExpressions.Regex.Replace(html, @"<img[^>]*>", " 🖼️ ", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var truncated = stripped.Length > 500 ? stripped.Substring(0, 500) : stripped;
         var plain = System.Text.RegularExpressions.Regex.Replace(truncated, "<.*?>", " ");
         plain = System.Net.WebUtility.HtmlDecode(plain).Trim();
         if (string.IsNullOrWhiteSpace(plain)) return "Brak tekstu";
@@ -2976,6 +3019,12 @@
         NoteService.OnNotesChanged -= OnNotesServiceChanged;
         ScheduleService.OnScheduleLoaded -= OnScheduleServiceLoaded;
         dotNetHelper?.Dispose();
+
+        _titleDebounceCts?.Cancel();
+        _titleDebounceCts?.Dispose();
+        _titleDebounceCts = null;
+
+        _thumbnailCache.Clear();
 
         if (cameraPollTimer != null)
         {

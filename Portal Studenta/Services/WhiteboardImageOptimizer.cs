@@ -56,7 +56,7 @@ namespace Portal_Studenta.Services
             }
 
             // Skopiuj wejściowy strumień do bufora pamięci, aby uniknąć problemów z blokowaniem strumienia
-            var memoryStream = new MemoryStream();
+            using var memoryStream = new MemoryStream();
             await inputPhotoStream.CopyToAsync(memoryStream);
             memoryStream.Position = 0;
 
@@ -104,9 +104,19 @@ namespace Portal_Studenta.Services
                         optimizedImage = image.Downsize((float)maxResolution);
                     }
 
-                    using (var outFs = File.Create(targetFilePath))
+                    try
                     {
-                        optimizedImage.Save(outFs, ImageFormat.Jpeg, quality);
+                        using (var outFs = File.Create(targetFilePath))
+                        {
+                            optimizedImage.Save(outFs, ImageFormat.Jpeg, quality);
+                        }
+                    }
+                    finally
+                    {
+                        if (optimizedImage != image && optimizedImage is IDisposable disp)
+                        {
+                            disp.Dispose();
+                        }
                     }
 
                     // Miniatura (maks 280px)
