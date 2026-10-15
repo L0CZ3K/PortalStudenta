@@ -5,6 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <DefineConstants>$(DefineConstants);TEST_PROJECT</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,6 +32,7 @@
     <Compile Include="..\Portal Studenta\Services\OAuth1Helper.cs" LinkBase="Services" />
     <Compile Include="..\Portal Studenta\Services\WhiteboardImageOptimizer.cs" LinkBase="Services" />
     <Compile Include="..\Portal Studenta\Services\NoteService.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\PdfExportService.cs" LinkBase="Services" />
     <Compile Include="..\Portal Studenta\Services\UniversityHealthLogic.cs" LinkBase="Services" />
     <Compile Include="..\Portal Studenta\Services\ProfileLogic.cs" LinkBase="Services" />
     <Compile Include="..\Portal Studenta\Services\NotificationMessageLogic.cs" LinkBase="Services" />

@@ -523,6 +523,11 @@
         border-color: rgba(234, 179, 8, 0.4) !important;
     }
 
+    .toolbar-tool-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
     .sharing-mode-selector {
         display: inline-flex;
         align-items: center;
@@ -1422,6 +1427,9 @@
                                 👥 <span class="sharing-pill-label">Wszyscy</span>
                             </button>
                         </div>
+                        <button type="button" class="toolbar-tool-btn" @onclick="ExportActiveNoteToPdfAsync" title="Eksportuj notatkę do PDF" disabled="@isExportingPdf">
+                            @(isExportingPdf ? "⏳ PDF..." : "📄 PDF")
+                        </button>
                         <button class="toolbar-tool-btn @(activeNote.IsPinned ? "active" : "")" @onclick="TogglePinActiveNote" title="Przypnij notatkę">
                             📌
                         </button>
@@ -2339,6 +2347,47 @@
                 _ = UpdateEditorContentAsync();
                 _ = LoadThumbnailsForActiveNoteAsync();
             }
+        }
+    }
+
+    private bool isExportingPdf = false;
+
+    private async Task ExportActiveNoteToPdfAsync()
+    {
+        if (activeNote == null || isExportingPdf) return;
+        isExportingPdf = true;
+        StateHasChanged();
+
+        try
+        {
+            try
+            {
+                var currentContent = await JS.InvokeAsync<string>("notesEditor.getCleanContent");
+                if (!string.IsNullOrEmpty(currentContent))
+                {
+                    activeNote.Content = currentContent;
+                    await NoteService.SaveNoteAsync(activeNote);
+                }
+            }
+            catch (Exception jsEx)
+            {
+                Console.WriteLine($"[Notes] Could not sync latest editor HTML before PDF export: {jsEx.Message}");
+            }
+
+            var pdfPath = await PdfExportService.ExportAndOpenPdfAsync(activeNote, NoteService);
+            if (string.IsNullOrEmpty(pdfPath))
+            {
+                Console.WriteLine("[Notes] PDF export returned null or failed.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] ExportActiveNoteToPdfAsync error: {ex.Message}");
+        }
+        finally
+        {
+            isExportingPdf = false;
+            StateHasChanged();
         }
     }
 
