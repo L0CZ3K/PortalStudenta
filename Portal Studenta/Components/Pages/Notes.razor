@@ -1702,23 +1702,46 @@
                             <div style="margin-top: 6px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
                                 Uruchom aplikację na Macu i wejdź w Notatki, aby połączyć.
                             </div>
-                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenPhoneTransmitModal" style="margin-top: 10px; border-radius: 8px; font-weight: 600;">
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="CheckPcStatusAsync" style="margin-top: 10px; border-radius: 8px; font-weight: 600;">
+                                🔄 Sprawdź ponownie
+                            </button>
+                        </div>
+                    }
+                    else if (!isTargetPcListening)
+                    {
+                        <!-- TRYB ŻÓŁTY: Komputer online, ale nie kliknięto «Z telefonu» na PC -->
+                        <div class="remote-cam-code-card" style="margin-bottom: 16px; border: 1.5px solid #eab308; background: rgba(234, 179, 8, 0.1);">
+                            <div style="font-size: 1.5rem; margin-bottom: 4px;">💻 ⏳ 📱</div>
+                            <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: #ca8a04; font-weight: 700;">
+                                Oczekiwanie na komputer:
+                            </span>
+                            <div style="font-size: 1.05rem; font-weight: 700; color: #ca8a04; margin-top: 2px;">
+                                Kliknij «Z telefonu» na komputerze
+                            </div>
+                            <div style="margin-top: 6px; font-size: 0.82rem; color: var(--text-muted); line-height: 1.45;">
+                                Komputer jest połączony, ale oczekuje na otwarcie notatki i kliknięcie przycisku <b>«📱 Z telefonu»</b> w pasku narzędzi.
+                            </div>
+                            <div style="margin-top: 8px; font-size: 0.78rem; color: #ca8a04; font-weight: 600;">
+                                @(targetPcConnectionMode == "wifi" ? "⚡ Połączono przez Wi-Fi (oczekiwanie na kliknięcie na PC)" : "☁️ Połączono przez chmurę (oczekiwanie na kliknięcie na PC)")
+                            </div>
+                            <button type="button" class="btn btn-sm" @onclick="CheckPcStatusAsync" style="margin-top: 10px; border-radius: 8px; font-weight: 600; background: rgba(234, 179, 8, 0.22); color: #ca8a04; border: 1px solid rgba(234, 179, 8, 0.45);">
                                 🔄 Sprawdź ponownie
                             </button>
                         </div>
                     }
                     else
                     {
-                        <div class="remote-cam-code-card" style="margin-bottom: 16px; border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.06);">
+                        <!-- TRYB ZIELONY: Komputer gotowy i aktywnie nasłuchuje na zdjęcie -->
+                        <div class="remote-cam-code-card" style="margin-bottom: 16px; border: 1px solid rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.08);">
                             <div style="font-size: 1.5rem; margin-bottom: 4px;">💻 ➔ 📄</div>
-                            <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">
-                                Docelowa notatka na PC:
+                            <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: #10b981; font-weight: 700;">
+                                Komputer gotowy do odbioru:
                             </span>
                             <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-top: 2px;">
-                                @(string.IsNullOrWhiteSpace(remoteTargetNoteTitle) ? "Nowa notatka na PC" : remoteTargetNoteTitle)
+                                @(string.IsNullOrWhiteSpace(remoteTargetNoteTitle) ? "Aktywna notatka na PC" : remoteTargetNoteTitle)
                             </div>
                             <div style="margin-top: 6px; font-size: 0.78rem; color: #10b981; font-weight: 600;">
-                                @(targetPcConnectionMode == "wifi" ? "⚡ Połączono bezpośrednio przez Wi-Fi (<50ms)" : "☁️ Połączono przez chmurę")
+                                @(targetPcConnectionMode == "wifi" ? "⚡ Gotowy do odbioru przez Wi-Fi (<50ms)" : "☁️ Gotowy do odbioru przez chmurę")
                             </div>
                         </div>
                     }
@@ -1755,10 +1778,33 @@
                     }
 
                     <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px;">
-                        <button type="button" class="btn btn-primary" @onclick="TransmitPhotoFromCurrentDeviceAsync" disabled="@(isTransmittingPhoto || !isTargetPcOnline || isCheckingPcStatus)" style="padding: 10px; font-weight: 700; font-size: 0.95rem; border-radius: 10px;">
-                            @(isTransmittingPhoto ? "⏳ Przesyłanie..." : "📸 Zrób i wyślij zdjęcie na PC")
+                        <button type="button" 
+                                class="btn @(isTargetPcListening ? "btn-primary" : "btn-secondary")" 
+                                @onclick="TransmitPhotoFromCurrentDeviceAsync" 
+                                disabled="@(isTransmittingPhoto || !isTargetPcOnline || !isTargetPcListening || isCheckingPcStatus)" 
+                                style="padding: 10px; font-weight: 700; font-size: 0.95rem; border-radius: 10px; @(!isTargetPcListening && isTargetPcOnline ? "background: rgba(234, 179, 8, 0.2); color: #ca8a04; border: 1px solid rgba(234, 179, 8, 0.45); cursor: not-allowed;" : "")">
+                            @if (isTransmittingPhoto)
+                            {
+                                <span>⏳ Przesyłanie...</span>
+                            }
+                            else if (!isTargetPcOnline)
+                            {
+                                <span>❌ Komputer niepołączony</span>
+                            }
+                            else if (!isTargetPcListening)
+                            {
+                                <span>🔒 Najpierw kliknij «Z telefonu» na PC</span>
+                            }
+                            else
+                            {
+                                <span>📸 Zrób i wyślij zdjęcie na PC</span>
+                            }
                         </button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="PickAndTransmitFromGalleryAsync" disabled="@(isTransmittingPhoto || !isTargetPcOnline || isCheckingPcStatus)" style="border-radius: 10px; font-size: 0.88rem;">
+                        <button type="button" 
+                                class="btn btn-outline-secondary" 
+                                @onclick="PickAndTransmitFromGalleryAsync" 
+                                disabled="@(isTransmittingPhoto || !isTargetPcOnline || !isTargetPcListening || isCheckingPcStatus)" 
+                                style="border-radius: 10px; font-size: 0.88rem; @(!isTargetPcListening && isTargetPcOnline ? "opacity: 0.5; cursor: not-allowed;" : "")">
                             🖼️ Wybierz z galerii telefonu
                         </button>
                     </div>
@@ -1795,9 +1841,11 @@
     private string transmitStatusMessage = "";
     private bool isTransmittingPhoto = false;
     private bool isTargetPcOnline = false;
+    private bool isTargetPcListening = false;
     private bool isCheckingPcStatus = false;
     private string targetPcConnectionMode = "offline"; // "wifi", "cloud", "offline"
     private System.Timers.Timer? pcHeartbeatTimer;
+    private System.Timers.Timer? phoneStatusPollTimer;
 
     private IEnumerable<Note> FilteredNotes
     {
@@ -2759,7 +2807,17 @@
             var noteTitle = activeNote?.Title ?? "Nowa notatka";
             var endpoint = wifiServer?.EndpointUrl;
             var authToken = wifiServer?.AuthToken;
-            await FirebaseService.SetPermanentRemoteCameraReadyAsync(album, noteId, noteTitle, endpoint, authToken);
+
+            if (showRemoteCameraModal)
+            {
+                if (wifiServer != null) wifiServer.IsAcceptingPhotos = true;
+                await FirebaseService.SetPermanentRemoteCameraReadyAsync(album, noteId, noteTitle, endpoint, authToken);
+            }
+            else
+            {
+                if (wifiServer != null) wifiServer.IsAcceptingPhotos = false;
+                await FirebaseService.SetPermanentRemoteCameraStandbyAsync(album, noteId, noteTitle, endpoint, authToken);
+            }
         }
         catch (Exception ex)
         {
@@ -2801,6 +2859,10 @@
                     {
                         await JS.InvokeVoidAsync("notesEditor.insertInlineImage", attachmentId, dataUri, fileName);
                         showRemoteCameraModal = false;
+                        isCameraWaiting = false;
+                        cameraPollTimer?.Stop();
+                        if (wifiServer != null) wifiServer.IsAcceptingPhotos = false;
+                        await BroadcastCameraStateAsync();
                         StateHasChanged();
                     });
                 }
@@ -2818,10 +2880,10 @@
         var album = GetCurrentStudentAlbum();
 
         await InitLocalCameraServerAsync();
-        await BroadcastCameraStateAsync();
-
         showRemoteCameraModal = true;
         isCameraWaiting = true;
+        if (wifiServer != null) wifiServer.IsAcceptingPhotos = true;
+        await BroadcastCameraStateAsync();
 
         cameraPollTimer?.Stop();
         cameraPollTimer?.Dispose();
@@ -2859,6 +2921,9 @@
         cameraPollTimer?.Dispose();
         cameraPollTimer = null;
         showRemoteCameraModal = false;
+        isCameraWaiting = false;
+        if (wifiServer != null) wifiServer.IsAcceptingPhotos = false;
+        _ = BroadcastCameraStateAsync();
         StateHasChanged();
     }
 
@@ -2880,6 +2945,7 @@
     {
         isCheckingPcStatus = true;
         isTargetPcOnline = false;
+        isTargetPcListening = false;
         targetPcConnectionMode = "offline";
         isCameraPermissionDenied = false;
         isTransmittingPhoto = false;
@@ -2887,6 +2953,33 @@
         showPhoneTransmitModal = true;
         StateHasChanged();
 
+        await CheckPcStatusAsync();
+
+        phoneStatusPollTimer?.Stop();
+        phoneStatusPollTimer?.Dispose();
+        phoneStatusPollTimer = new System.Timers.Timer(2500);
+        phoneStatusPollTimer.Elapsed += async (s, e) =>
+        {
+            if (showPhoneTransmitModal && !isTransmittingPhoto)
+            {
+                await InvokeAsync(CheckPcStatusAsync);
+            }
+        };
+        phoneStatusPollTimer.AutoReset = true;
+        phoneStatusPollTimer.Start();
+    }
+
+    private void ClosePhoneTransmitModal()
+    {
+        phoneStatusPollTimer?.Stop();
+        phoneStatusPollTimer?.Dispose();
+        phoneStatusPollTimer = null;
+        showPhoneTransmitModal = false;
+        StateHasChanged();
+    }
+
+    private async Task CheckPcStatusAsync()
+    {
         try
         {
             var album = GetCurrentStudentAlbum();
@@ -2895,6 +2988,7 @@
             if (session == null || session.Status == "offline")
             {
                 isTargetPcOnline = false;
+                isTargetPcListening = false;
                 targetPcConnectionMode = "offline";
                 remoteTargetNoteTitle = "";
                 remoteTargetLocalEndpoint = "";
@@ -2909,35 +3003,39 @@
                 // Sprawdź czy heartbeat z Firebase nie jest przestarzały (np. Mac uśpiony/wyłączony > 25 sekund)
                 var isHeartbeatFresh = (DateTime.UtcNow - session.UpdatedAt) <= TimeSpan.FromSeconds(25);
 
-                // 1. Jeśli mamy endpoint Wi-Fi, wykonaj szybki ping (700ms)
+                // 1. Sprawdź Wi-Fi ze statusem nasłuchiwania
                 bool wifiAlive = false;
+                bool wifiListening = false;
                 if (!string.IsNullOrEmpty(remoteTargetLocalEndpoint))
                 {
-                    wifiAlive = await LocalNetworkCameraServer.PingAsync(remoteTargetLocalEndpoint);
+                    (wifiAlive, wifiListening) = await LocalNetworkCameraServer.PingWithStatusAsync(remoteTargetLocalEndpoint);
                 }
 
                 if (wifiAlive)
                 {
                     isTargetPcOnline = true;
                     targetPcConnectionMode = "wifi";
+                    isTargetPcListening = wifiListening || (session.Status == "ready" && session.IsListening);
                 }
-                else if (isHeartbeatFresh && session.Status == "ready")
+                else if (isHeartbeatFresh)
                 {
-                    // Wi-Fi nie odpowiedziało (np. izolacja AP na uczelni), ale Mac żyje w chmurze
                     isTargetPcOnline = true;
                     targetPcConnectionMode = "cloud";
+                    isTargetPcListening = session.Status == "ready" && session.IsListening;
                 }
                 else
                 {
                     isTargetPcOnline = false;
+                    isTargetPcListening = false;
                     targetPcConnectionMode = "offline";
                 }
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Notes] OpenPhoneTransmitModal error: {ex.Message}");
+            Console.WriteLine($"[Notes] CheckPcStatusAsync error: {ex.Message}");
             isTargetPcOnline = false;
+            isTargetPcListening = false;
             targetPcConnectionMode = "offline";
         }
         finally
@@ -2947,14 +3045,15 @@
         }
     }
 
-    private void ClosePhoneTransmitModal()
-    {
-        showPhoneTransmitModal = false;
-        StateHasChanged();
-    }
-
     private async Task PickAndTransmitFromGalleryAsync()
     {
+        if (!isTargetPcListening)
+        {
+            transmitStatusMessage = "Kliknij najpierw «Z telefonu» na komputerze.";
+            StateHasChanged();
+            return;
+        }
+
         try
         {
             isTransmittingPhoto = true;
@@ -3003,6 +3102,13 @@
 
     private async Task TransmitPhotoFromCurrentDeviceAsync()
     {
+        if (!isTargetPcListening)
+        {
+            transmitStatusMessage = "Kliknij najpierw «Z telefonu» na komputerze.";
+            StateHasChanged();
+            return;
+        }
+
         try
         {
             isTransmittingPhoto = true;
@@ -3298,6 +3404,13 @@
             pcHeartbeatTimer.Stop();
             pcHeartbeatTimer.Dispose();
             pcHeartbeatTimer = null;
+        }
+
+        if (phoneStatusPollTimer != null)
+        {
+            phoneStatusPollTimer.Stop();
+            phoneStatusPollTimer.Dispose();
+            phoneStatusPollTimer = null;
         }
 
         wifiServer?.Dispose();

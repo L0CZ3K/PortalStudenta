@@ -29,6 +29,7 @@ namespace Portal_Studenta.Services
         public string AuthToken { get; set; } = Guid.NewGuid().ToString("N");
         public string? EndpointUrl => !string.IsNullOrEmpty(LocalIpAddress) && _isRunning ? $"http://{LocalIpAddress}:{Port}" : null;
         public bool IsRunning => _isRunning;
+        public volatile bool IsAcceptingPhotos = false;
 
         public static string? GetLocalIpAddress()
         {
@@ -240,17 +241,30 @@ namespace Portal_Studenta.Services
                     return;
                 }
 
-                // Obsługa Ping / Health-check (sprawdzanie czy PC rzeczywiście żyje w sieci)
+                // Obsługa Ping / Health-check (sprawdzanie czy PC rzeczywiście żyje w sieci i czy nasłuchuje)
                 if (requestLine.StartsWith("GET /api/ping", StringComparison.OrdinalIgnoreCase) ||
                     requestLine.StartsWith("HEAD", StringComparison.OrdinalIgnoreCase))
                 {
+                    var pingJson = "{\"pong\":true,\"listening\":" + (IsAcceptingPhotos ? "true" : "false") + "}";
                     var pingResp = "HTTP/1.1 200 OK\r\n" +
                                    "Access-Control-Allow-Origin: *\r\n" +
                                    "Content-Type: application/json\r\n" +
                                    "Connection: close\r\n\r\n" +
-                                   "{\"pong\":true}";
+                                   pingJson;
                     var pingBytes = Encoding.UTF8.GetBytes(pingResp);
                     await stream.WriteAsync(pingBytes.AsMemory(0, pingBytes.Length), ct);
+                    return;
+                }
+
+                // Sprawdź czy PC aktywnie nasłuchuje (czy użytkownik kliknął «Z telefonu»)
+                if (!IsAcceptingPhotos)
+                {
+                    var notListeningResp = "HTTP/1.1 409 Conflict\r\n" +
+                                           "Access-Control-Allow-Origin: *\r\n" +
+                                           "Content-Type: application/json\r\n" +
+                                           "Connection: close\r\n\r\n" +
+                                           "{\"error\":\"PC_NOT_LISTENING\",\"message\":\"Komputer nie oczekuje obecnie na zdjęcie (kliknij «Z telefonu» na PC).\"}";
+                    await stream.WriteAsync(Encoding.UTF8.GetBytes(notListeningResp).AsMemory(), ct);
                     return;
                 }
 
@@ -399,22 +413,40 @@ namespace Portal_Studenta.Services
         }
 
         /// <summary>
-        /// Szybko sprawdza czy serwer na Macu jest włączony i osiągalny pod danym adresem IP.
+        /// Szybko sprawdza czy serwer na Macu jest włączony i czy aktywnie nasłuchuje na zdjęcia («Z telefonu»).
         /// </summary>
-        public static async Task<bool> PingAsync(string endpointUrl)
+        public static async Task<(bool alive, bool isListening)> PingWithStatusAsync(string endpointUrl)
         {
-            if (string.IsNullOrWhiteSpace(endpointUrl)) return false;
+            if (string.IsNullOrWhiteSpace(endpointUrl)) return (false, false);
             try
             {
                 using var httpClient = new HttpClient { Timeout = TimeSpan.FromMilliseconds(700) };
                 var url = endpointUrl.TrimEnd('/') + "/api/ping";
                 var response = await httpClient.GetAsync(url);
-                return response.IsSuccessStatusCode;
+                if (!response.IsSuccessStatusCode) return (false, false);
+
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                bool listening = false;
+                if (doc.RootElement.TryGetProperty("listening", out var lProp))
+                {
+                    listening = lProp.GetBoolean();
+                }
+                return (true, listening);
             }
             catch
             {
-                return false;
+                return (false, false);
             }
+        }
+
+        /// <summary>
+        /// Szybko sprawdza czy serwer na Macu jest włączony i osiągalny pod danym adresem IP.
+        /// </summary>
+        public static async Task<bool> PingAsync(string endpointUrl)
+        {
+            var res = await PingWithStatusAsync(endpointUrl);
+            return res.alive;
         }
 
         private static int FindHeaderEnd(byte[] buffer, int length)

@@ -1438,6 +1438,35 @@ namespace Portal_Studenta.Services
 
         public const string PermanentCameraSessionId = "default";
 
+        public async Task<RemoteCameraSession?> SetPermanentRemoteCameraStandbyAsync(string albumNumber, string noteId, string noteTitle, string? localEndpoint = null, string? authToken = null)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber)) return null;
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                var session = new RemoteCameraSession
+                {
+                    SessionId = PermanentCameraSessionId,
+                    NoteId = noteId,
+                    NoteTitle = noteTitle,
+                    LocalEndpoint = localEndpoint,
+                    AuthToken = authToken,
+                    Status = "idle",
+                    IsListening = false,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                await _firebase.Child("users").Child(sAlbum).Child("camera_sessions").Child(PermanentCameraSessionId).PutAsync(session);
+                return session;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd ustawiania stanu oczekiwania aparatu: {ex.Message}");
+                return null;
+            }
+        }
+
         public async Task<RemoteCameraSession?> SetPermanentRemoteCameraReadyAsync(string albumNumber, string noteId, string noteTitle, string? localEndpoint = null, string? authToken = null)
         {
             if (string.IsNullOrWhiteSpace(albumNumber)) return null;
@@ -1452,6 +1481,7 @@ namespace Portal_Studenta.Services
                     LocalEndpoint = localEndpoint,
                     AuthToken = authToken,
                     Status = "ready",
+                    IsListening = true,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 };
@@ -1481,6 +1511,7 @@ namespace Portal_Studenta.Services
                 if (session != null)
                 {
                     session.Status = "offline";
+                    session.IsListening = false;
                     session.LocalEndpoint = null;
                     session.UpdatedAt = DateTime.UtcNow;
                     await _firebase.Child("users").Child(sAlbum).Child("camera_sessions").Child(PermanentCameraSessionId).PutAsync(session);
@@ -1499,7 +1530,7 @@ namespace Portal_Studenta.Services
             {
                 var sAlbum = SanitizeKey(albumNumber);
                 var session = await GetPermanentRemoteCameraSessionAsync(albumNumber);
-                if (session != null && session.Status == "ready")
+                if (session != null && session.Status != "offline")
                 {
                     session.UpdatedAt = DateTime.UtcNow;
                     await _firebase.Child("users").Child(sAlbum).Child("camera_sessions").Child(PermanentCameraSessionId).PutAsync(session);
@@ -1701,7 +1732,8 @@ namespace Portal_Studenta.Services
         public string SessionId { get; set; } = "default";
         public string NoteId { get; set; } = "";
         public string NoteTitle { get; set; } = "";
-        public string Status { get; set; } = "waiting"; // waiting, ready, uploaded, completed, cancelled
+        public string Status { get; set; } = "idle"; // idle, ready, uploaded, completed, cancelled, offline
+        public bool IsListening { get; set; } = false;
         public string? LocalEndpoint { get; set; } // http://192.168.1.124:5273
         public string? AuthToken { get; set; }
         public string? PhotoDataBase64 { get; set; }
