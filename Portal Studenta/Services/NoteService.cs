@@ -15,9 +15,19 @@ namespace Portal_Studenta.Services
         Task<List<Note>> GetUserNotesFromCloudAsync(string albumNumber);
         Task SyncNoteToCloudAsync(string albumNumber, Note note);
         Task DeleteNoteFromCloudAsync(string albumNumber, Guid noteId);
+        Task<HashSet<Guid>> GetDeletedNoteIdsFromCloudAsync(string albumNumber);
         Task<List<Note>> GetGroupSharedNotesAsync(string groupCode);
         Task ShareNoteToGroupLobbyAsync(string groupCode, Note note);
         Task UnshareNoteFromGroupLobbyAsync(string groupCode, Guid noteId);
+        Task<HashSet<Guid>> GetGroupDeletedNoteIdsFromCloudAsync(string groupCode);
+    }
+
+    [Table("DeletedNoteTombstones")]
+    public class DeletedNoteTombstone
+    {
+        [PrimaryKey]
+        public Guid NoteId { get; set; }
+        public DateTime DeletedAt { get; set; } = DateTime.UtcNow;
     }
 
     /// <summary>
@@ -28,6 +38,8 @@ namespace Portal_Studenta.Services
     public class NoteService : IDisposable
     {
         private readonly SemaphoreSlim _dbLock = new(1, 1);
+        private readonly SemaphoreSlim _syncLock = new(1, 1);
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, DateTime> _locallyDeletedNoteIds = new();
         private readonly List<Note> _notes = new();
         private SQLiteAsyncConnection? _db;
         private bool _isInitialized;
@@ -87,6 +99,17 @@ namespace Portal_Studenta.Services
                 var dbPath = GetDatabasePath();
                 _db = new SQLiteAsyncConnection(dbPath, SQLiteOpenFlags.Create | SQLiteOpenFlags.ReadWrite | SQLiteOpenFlags.FullMutex);
                 await _db.CreateTableAsync<Note>();
+                await _db.CreateTableAsync<DeletedNoteTombstone>();
+
+                var cutoff = DateTime.UtcNow.AddDays(-30);
+                var tombstones = await _db.Table<DeletedNoteTombstone>().ToListAsync();
+                foreach (var t in tombstones)
+                {
+                    if (t.DeletedAt >= cutoff)
+                    {
+                        _locallyDeletedNoteIds[t.NoteId] = t.DeletedAt;
+                    }
+                }
 
                 var persisted = await _db.Table<Note>().ToListAsync();
                 lock (_notes)
@@ -95,6 +118,12 @@ namespace Portal_Studenta.Services
                     var existingIds = _notes.Select(n => n.Id).ToHashSet();
                     foreach (var note in persisted)
                     {
+                        // Nie przywracaj notatek, które zostały usunięte
+                        if (_locallyDeletedNoteIds.ContainsKey(note.Id))
+                        {
+                            continue;
+                        }
+
                         if (!existingIds.Contains(note.Id))
                         {
                             _notes.Add(note);
@@ -108,6 +137,42 @@ namespace Portal_Studenta.Services
             finally
             {
                 _dbLock.Release();
+            }
+        }
+
+        public async Task RecordLocalTombstoneAsync(Guid id)
+        {
+            _locallyDeletedNoteIds[id] = DateTime.UtcNow;
+            if (_db != null)
+            {
+                await _dbLock.WaitAsync();
+                try
+                {
+                    await _db.InsertOrReplaceAsync(new DeletedNoteTombstone { NoteId = id, DeletedAt = DateTime.UtcNow });
+                }
+                catch {}
+                finally
+                {
+                    _dbLock.Release();
+                }
+            }
+        }
+
+        public async Task RemoveLocalTombstoneAsync(Guid id)
+        {
+            _locallyDeletedNoteIds.TryRemove(id, out _);
+            if (_db != null)
+            {
+                await _dbLock.WaitAsync();
+                try
+                {
+                    await _db.DeleteAsync<DeletedNoteTombstone>(id);
+                }
+                catch {}
+                finally
+                {
+                    _dbLock.Release();
+                }
             }
         }
 
@@ -153,6 +218,7 @@ namespace Portal_Studenta.Services
         public void AddNote(Note note)
         {
             if (note == null) throw new ArgumentNullException(nameof(note), "Note cannot be null.");
+            _locallyDeletedNoteIds.TryRemove(note.Id, out _);
             note.Content = StripHeavyDataUris(note.Content);
 
             lock (_notes)
@@ -185,6 +251,7 @@ namespace Portal_Studenta.Services
 
         public void DeleteNote(Guid id)
         {
+            _locallyDeletedNoteIds[id] = DateTime.UtcNow;
             Note? note;
             lock (_notes)
             {
@@ -196,6 +263,7 @@ namespace Portal_Studenta.Services
             {
                 try
                 {
+                    await RecordLocalTombstoneAsync(id);
                     DeleteAttachmentFiles(note);
                     await EnsureInitializedAsync();
                     if (_db != null)
@@ -227,6 +295,8 @@ namespace Portal_Studenta.Services
         public async Task SaveNoteAsync(Note note)
         {
             if (note == null) throw new ArgumentNullException(nameof(note));
+            _locallyDeletedNoteIds.TryRemove(note.Id, out _);
+            _ = RemoveLocalTombstoneAsync(note.Id);
             note.UpdatedAt = DateTime.Now;
             note.Content = StripHeavyDataUris(note.Content);
 
@@ -246,6 +316,7 @@ namespace Portal_Studenta.Services
         /// </summary>
         public async Task DeleteNoteAsync(Guid id)
         {
+            _locallyDeletedNoteIds[id] = DateTime.UtcNow;
             Note? n;
             lock (_notes)
             {
@@ -254,6 +325,7 @@ namespace Portal_Studenta.Services
             }
 
             DeleteAttachmentFiles(n);
+            await RecordLocalTombstoneAsync(id);
 
             await EnsureInitializedAsync();
             if (_db != null)
@@ -781,20 +853,42 @@ namespace Portal_Studenta.Services
         public async Task SyncWithCloudAsync(IFirebaseNoteSync firebaseService, string? albumNumber, string? groupCode)
         {
             if (firebaseService == null) return;
-            await EnsureInitializedAsync();
+            if (!await _syncLock.WaitAsync(0)) return;
 
             try
             {
+                await EnsureInitializedAsync();
                 var localNotesSnapshot = GetAllNotes();
 
                 // 1. Synchronizacja prywatna (Moje urządzenia - BetweenDevices & SharedWithAll)
                 if (!string.IsNullOrWhiteSpace(albumNumber))
                 {
+                    var cloudDeletedIds = await firebaseService.GetDeletedNoteIdsFromCloudAsync(albumNumber);
+
+                    // A. Usuń notatki skasowane w chmurze
+                    foreach (var localNote in localNotesSnapshot)
+                    {
+                        if (cloudDeletedIds.Contains(localNote.Id) || _locallyDeletedNoteIds.ContainsKey(localNote.Id))
+                        {
+                            await DeleteNoteAsync(localNote.Id);
+                        }
+                    }
+
                     var cloudUserNotes = await firebaseService.GetUserNotesFromCloudAsync(albumNumber);
                     var cloudMap = cloudUserNotes.ToDictionary(n => n.Id, n => n);
 
+                    // Odśwież migawkę po usunięciach
+                    localNotesSnapshot = GetAllNotes();
+
                     foreach (var cloudNote in cloudUserNotes)
                     {
+                        // Jeśli notatka została skasowana lokalnie, ale jeszcze wisi w chmurze, usuń z chmury i pomiń
+                        if (_locallyDeletedNoteIds.ContainsKey(cloudNote.Id) || cloudDeletedIds.Contains(cloudNote.Id))
+                        {
+                            await firebaseService.DeleteNoteFromCloudAsync(albumNumber, cloudNote.Id);
+                            continue;
+                        }
+
                         var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == cloudNote.Id);
                         if (localMatch == null)
                         {
@@ -814,9 +908,12 @@ namespace Portal_Studenta.Services
                     }
 
                     // Wyślij lokalne notatki BetweenDevices/SharedWithAll, których jeszcze nie ma w chmurze
+                    // (Tylko jeśli nie ma ich w tombstones!)
                     foreach (var localNote in localNotesSnapshot.Where(n => n.SharingMode is NoteSharingMode.BetweenDevices or NoteSharingMode.SharedWithAll))
                     {
-                        if (!cloudMap.ContainsKey(localNote.Id))
+                        if (!cloudMap.ContainsKey(localNote.Id) &&
+                            !cloudDeletedIds.Contains(localNote.Id) &&
+                            !_locallyDeletedNoteIds.ContainsKey(localNote.Id))
                         {
                             await firebaseService.SyncNoteToCloudAsync(albumNumber, localNote);
                         }
@@ -826,14 +923,37 @@ namespace Portal_Studenta.Services
                 // 2. Synchronizacja grupowa (Udostępnione wszystkim - SharedWithAll)
                 if (!string.IsNullOrWhiteSpace(groupCode))
                 {
+                    var groupDeletedIds = await firebaseService.GetGroupDeletedNoteIdsFromCloudAsync(groupCode);
+
+                    // Usuń lokalnie notatki usunięte z lobby grupy
+                    foreach (var localNote in localNotesSnapshot.Where(n => n.SharingMode == NoteSharingMode.SharedWithAll))
+                    {
+                        if (groupDeletedIds.Contains(localNote.Id))
+                        {
+                            await DeleteNoteAsync(localNote.Id);
+                        }
+                    }
+
                     var groupNotes = await firebaseService.GetGroupSharedNotesAsync(groupCode);
+                    localNotesSnapshot = GetAllNotes();
+
                     foreach (var gNote in groupNotes)
                     {
+                        if (groupDeletedIds.Contains(gNote.Id) || _locallyDeletedNoteIds.ContainsKey(gNote.Id))
+                        {
+                            continue;
+                        }
+
                         var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == gNote.Id);
                         if (localMatch == null)
                         {
                             gNote.SharingMode = NoteSharingMode.SharedWithAll;
                             AddNote(gNote);
+                        }
+                        else if (gNote.UpdatedAt > localMatch.UpdatedAt)
+                        {
+                            gNote.SharingMode = NoteSharingMode.SharedWithAll;
+                            await SaveNoteAsync(gNote);
                         }
                     }
                 }
@@ -844,11 +964,16 @@ namespace Portal_Studenta.Services
             {
                 Console.WriteLine($"[NoteService] SyncWithCloudAsync error: {ex.Message}");
             }
+            finally
+            {
+                _syncLock.Release();
+            }
         }
 
         public void Dispose()
         {
             _dbLock.Dispose();
+            _syncLock.Dispose();
         }
     }
 }

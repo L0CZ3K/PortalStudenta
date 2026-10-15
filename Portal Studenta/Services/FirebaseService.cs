@@ -46,6 +46,11 @@ namespace Portal_Studenta.Services
         public DateTime? DeletedAt { get; set; }
     }
 
+    public class FirebaseNoteTombstone
+    {
+        public string DeletedAt { get; set; } = DateTime.UtcNow.ToString("O");
+    }
+
     public class FirebaseService : IDisposable, IFirebaseNoteSync
     {
         private readonly FirebaseClient _firebase;
@@ -1642,6 +1647,7 @@ namespace Portal_Studenta.Services
                 var sGroup = SanitizeKey(groupCode).ToUpperInvariant();
                 var sNoteId = SanitizeKey(note.Id.ToString());
                 await _firebase.Child("groups").Child(sGroup).Child("shared_notes").Child(sNoteId).PutAsync(note);
+                await _firebase.Child("groups").Child(sGroup).Child("deleted_notes").Child(sNoteId).DeleteAsync();
             }
             catch (Exception ex)
             {
@@ -1657,10 +1663,46 @@ namespace Portal_Studenta.Services
                 var sGroup = SanitizeKey(groupCode).ToUpperInvariant();
                 var sNoteId = SanitizeKey(noteId.ToString());
                 await _firebase.Child("groups").Child(sGroup).Child("shared_notes").Child(sNoteId).DeleteAsync();
+                await _firebase.Child("groups").Child(sGroup).Child("deleted_notes").Child(sNoteId).PutAsync(new FirebaseNoteTombstone());
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[FirebaseService] Błąd usuwania notatki z grupy: {ex.Message}");
+            }
+        }
+
+        public async Task<HashSet<Guid>> GetGroupDeletedNoteIdsFromCloudAsync(string groupCode)
+        {
+            if (string.IsNullOrWhiteSpace(groupCode)) return new HashSet<Guid>();
+            try
+            {
+                var sGroup = SanitizeKey(groupCode).ToUpperInvariant();
+                var deleted = await _firebase.Child("groups").Child(sGroup).Child("deleted_notes").OnceAsync<FirebaseNoteTombstone>();
+                var result = new HashSet<Guid>();
+                if (deleted != null)
+                {
+                    var cutoff = DateTime.UtcNow.AddDays(-30);
+                    foreach (var d in deleted)
+                    {
+                        if (Guid.TryParse(d.Key, out var gid))
+                        {
+                            if (d.Object != null && DateTime.TryParse(d.Object.DeletedAt, out var dt))
+                            {
+                                if (dt >= cutoff) result.Add(gid);
+                            }
+                            else
+                            {
+                                result.Add(gid);
+                            }
+                        }
+                    }
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd pobierania usuniętych notatek grupy: {ex.Message}");
+                return new HashSet<Guid>();
             }
         }
 
@@ -1688,6 +1730,7 @@ namespace Portal_Studenta.Services
                 var sAlbum = SanitizeKey(albumNumber);
                 var sNoteId = SanitizeKey(note.Id.ToString());
                 await _firebase.Child("users").Child(sAlbum).Child("notes").Child(sNoteId).PutAsync(note);
+                await _firebase.Child("users").Child(sAlbum).Child("deleted_notes").Child(sNoteId).DeleteAsync();
             }
             catch (Exception ex)
             {
@@ -1703,10 +1746,46 @@ namespace Portal_Studenta.Services
                 var sAlbum = SanitizeKey(albumNumber);
                 var sNoteId = SanitizeKey(noteId.ToString());
                 await _firebase.Child("users").Child(sAlbum).Child("notes").Child(sNoteId).DeleteAsync();
+                await _firebase.Child("users").Child(sAlbum).Child("deleted_notes").Child(sNoteId).PutAsync(new FirebaseNoteTombstone());
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[FirebaseService] Błąd usuwania notatki z chmury: {ex.Message}");
+            }
+        }
+
+        public async Task<HashSet<Guid>> GetDeletedNoteIdsFromCloudAsync(string albumNumber)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber)) return new HashSet<Guid>();
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                var deleted = await _firebase.Child("users").Child(sAlbum).Child("deleted_notes").OnceAsync<FirebaseNoteTombstone>();
+                var result = new HashSet<Guid>();
+                if (deleted != null)
+                {
+                    var cutoff = DateTime.UtcNow.AddDays(-30);
+                    foreach (var d in deleted)
+                    {
+                        if (Guid.TryParse(d.Key, out var gid))
+                        {
+                            if (d.Object != null && DateTime.TryParse(d.Object.DeletedAt, out var dt))
+                            {
+                                if (dt >= cutoff) result.Add(gid);
+                            }
+                            else
+                            {
+                                result.Add(gid);
+                            }
+                        }
+                    }
+                }
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd pobierania usuniętych notatek z chmury: {ex.Message}");
+                return new HashSet<Guid>();
             }
         }
 

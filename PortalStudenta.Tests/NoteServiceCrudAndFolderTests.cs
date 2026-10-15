@@ -478,12 +478,68 @@ namespace PortalStudenta.Tests
             Assert.Contains(all, n => n.Id == groupNoteId && n.Title == "Wspólna notatka grupy");
         }
 
+        [Fact]
+        public async Task SyncWithCloudAsync_DoesNotResurrectDeletedNotes_AndRemovesThemLocally()
+        {
+            var service = new NoteService();
+            var deletedNoteId = Guid.NewGuid();
+            var localNote = new Note
+            {
+                Id = deletedNoteId,
+                Title = "Notatka usunięta na telefonie",
+                Content = "Powinna zniknąć z PC",
+                SharingMode = NoteSharingMode.BetweenDevices,
+                UpdatedAt = DateTime.Now.AddMinutes(-5)
+            };
+            service.AddNote(localNote);
+
+            var mockSync = new MockFirebaseNoteSync();
+            // Telefon skasował notatkę i zapisał tombstone w chmurze
+            mockSync.CloudDeletedNotes.Add(deletedNoteId);
+
+            await service.SyncWithCloudAsync(mockSync, "12345", "GR_1");
+
+            var all = service.GetAllNotes();
+            // Notatka powinna zostać usunięta lokalnie na PC
+            Assert.DoesNotContain(all, n => n.Id == deletedNoteId);
+            // PC NIE może ponownie wysłać skasowanej notatki do chmury (brak zmartwychwstania)
+            Assert.DoesNotContain(mockSync.SyncedNotes, n => n.Id == deletedNoteId);
+        }
+
+        [Fact]
+        public async Task SyncWithCloudAsync_WhenDeletedLocally_DoesNotReAddFromCloud_AndDeletesFromCloud()
+        {
+            var service = new NoteService();
+            var noteId = Guid.NewGuid();
+            var note = new Note
+            {
+                Id = noteId,
+                Title = "Notatka do skasowania lokalnie",
+                SharingMode = NoteSharingMode.BetweenDevices
+            };
+            service.AddNote(note);
+            service.DeleteNote(noteId);
+
+            var mockSync = new MockFirebaseNoteSync();
+            // Chmura jeszcze ma starą wersję notatki
+            mockSync.UserNotes.Add(note);
+
+            await service.SyncWithCloudAsync(mockSync, "12345", "GR_1");
+
+            var all = service.GetAllNotes();
+            Assert.DoesNotContain(all, n => n.Id == noteId);
+            // Powinno wywołać DeleteNoteFromCloudAsync dla wiszącej notatki
+            Assert.Contains(mockSync.DeletedNotes, id => id == noteId);
+        }
+
         private class MockFirebaseNoteSync : IFirebaseNoteSync
         {
             public List<Note> UserNotes { get; } = new();
             public List<Note> GroupNotes { get; } = new();
             public List<Note> SyncedNotes { get; } = new();
             public List<Guid> DeletedNotes { get; } = new();
+            public HashSet<Guid> CloudDeletedNotes { get; } = new();
+            public HashSet<Guid> GroupDeletedNotes { get; } = new();
 
             public Task<List<Note>> GetUserNotesFromCloudAsync(string albumNumber) => Task.FromResult(UserNotes.ToList());
             public Task SyncNoteToCloudAsync(string albumNumber, Note note)
@@ -496,9 +552,11 @@ namespace PortalStudenta.Tests
                 DeletedNotes.Add(noteId);
                 return Task.CompletedTask;
             }
+            public Task<HashSet<Guid>> GetDeletedNoteIdsFromCloudAsync(string albumNumber) => Task.FromResult(new HashSet<Guid>(CloudDeletedNotes));
             public Task<List<Note>> GetGroupSharedNotesAsync(string groupCode) => Task.FromResult(GroupNotes.ToList());
             public Task ShareNoteToGroupLobbyAsync(string groupCode, Note note) => Task.CompletedTask;
             public Task UnshareNoteFromGroupLobbyAsync(string groupCode, Guid noteId) => Task.CompletedTask;
+            public Task<HashSet<Guid>> GetGroupDeletedNoteIdsFromCloudAsync(string groupCode) => Task.FromResult(new HashSet<Guid>(GroupDeletedNotes));
         }
     }
 }

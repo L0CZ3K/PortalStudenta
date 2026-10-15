@@ -1836,6 +1836,7 @@
     private bool isCameraWaiting = false;
     private bool isSyncingNotes = false;
     private System.Timers.Timer? cameraPollTimer;
+    private System.Timers.Timer? cloudSyncTimer;
 
     private bool showPhoneTransmitModal = false;
     private string transmitStatusMessage = "";
@@ -1931,6 +1932,29 @@
                     Console.WriteLine($"[Notes] Initial cloud sync error: {ex.Message}");
                 }
             });
+
+            cloudSyncTimer = new System.Timers.Timer(5000);
+            cloudSyncTimer.AutoReset = true;
+            cloudSyncTimer.Elapsed += (s, e) =>
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var alb = GetCurrentStudentAlbum();
+                        var grp = AppState.GroupCode;
+                        if (!string.IsNullOrWhiteSpace(alb) || !string.IsNullOrWhiteSpace(grp))
+                        {
+                            await NoteService.SyncWithCloudAsync(FirebaseService, alb, grp);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Notes] Background cloud sync error: {ex.Message}");
+                    }
+                });
+            };
+            cloudSyncTimer.Start();
         }
 
         if (activeNote != null)
@@ -3363,9 +3387,26 @@
 
     private void OnNotesServiceChanged()
     {
-        InvokeAsync(() =>
+        InvokeAsync(async () =>
         {
             RefreshHierarchy();
+            if (activeNote != null && !NoteService.GetAllNotes().Any(n => n.Id == activeNote.Id))
+            {
+                activeNote = FilteredNotes.FirstOrDefault();
+                if (activeNote != null)
+                {
+                    await UpdateEditorContentAsync();
+                    await LoadThumbnailsForActiveNoteAsync();
+                }
+                else
+                {
+                    if (isJsInitialized)
+                    {
+                        try { await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, "", ""); } catch {}
+                    }
+                    mobileDepth = 1;
+                }
+            }
             StateHasChanged();
         });
     }
@@ -3391,6 +3432,13 @@
         _titleDebounceCts = null;
 
         _thumbnailCache.Clear();
+
+        if (cloudSyncTimer != null)
+        {
+            cloudSyncTimer.Stop();
+            cloudSyncTimer.Dispose();
+            cloudSyncTimer = null;
+        }
 
         if (cameraPollTimer != null)
         {
