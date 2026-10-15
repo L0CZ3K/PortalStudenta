@@ -1,0 +1,2526 @@
+@page "/schedule"
+@using Portal_Studenta.Models
+@using Portal_Studenta.Services
+@using Microsoft.Maui.Networking
+@inject Portal_Studenta.Services.ScheduleService ScheduleService
+@inject IJSRuntime JS
+@inject Portal_Studenta.Services.AppState AppState
+@inject Portal_Studenta.Services.UsosApiService UsosApiService
+@inject Portal_Studenta.Services.CalendarExportService CalendarExportService
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<style>
+    .calendar-container { 
+        display: flex; 
+        background: var(--card-bg); 
+        border: 1px solid var(--border-color); 
+        border-radius: var(--radius); 
+        overflow-x: hidden; 
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        position: relative; 
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .calendar-time-col { 
+        width: 36px !important; 
+        min-width: 36px !important;
+        flex-shrink: 0; 
+        border-right: 1px solid var(--border-color); 
+        background: var(--card-bg); 
+        position: sticky; 
+        left: 0; 
+        z-index: 25; 
+        align-self: stretch;
+    }
+    
+    .calendar-day-col { 
+        flex: 1 1 0; 
+        min-width: 0; 
+        position: relative; 
+        border-right: 1px solid var(--border-color);
+        align-self: stretch;
+        background: var(--card-bg);
+    }
+    .calendar-day-col:last-child { 
+        border-right: none; 
+    }
+
+    .compact-weekend-col {
+        flex: 0 0 20px !important;
+        min-width: 20px !important;
+        max-width: 20px !important;
+        background: rgba(0, 0, 0, 0.12) !important;
+    }
+    
+    .calendar-header { 
+        position: sticky; 
+        top: 0; 
+        z-index: 30;
+        background: var(--card-bg); 
+        text-align: center; 
+        padding: 2px 1px; 
+        border-bottom: 1px solid var(--border-color); 
+        height: 38px; 
+        display: flex; 
+        flex-direction: column; 
+        justify-content: center; 
+        align-items: center;
+        box-sizing: border-box; 
+        color: var(--text-main);
+        user-select: none;
+    }
+
+    .compact-weekend-col .calendar-header {
+        padding: 0;
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--text-muted);
+        text-transform: uppercase;
+    }
+
+    .calendar-day-name {
+        font-size: 0.64rem;
+        font-weight: 600;
+        line-height: 1;
+        color: var(--text-muted);
+        text-transform: lowercase;
+    }
+
+    .calendar-day-num {
+        font-size: 0.78rem;
+        font-weight: 700;
+        line-height: 1.1;
+        color: var(--text-main);
+        margin-top: 1px;
+    }
+
+    .today-number {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: var(--primary-color);
+        color: #ffffff !important;
+        font-size: 0.70rem;
+        box-shadow: 0 2px 6px var(--primary-glow);
+    }
+    
+    .calendar-time-col .calendar-header { 
+        z-index: 40; 
+        font-size: 0.68rem; 
+        text-transform: uppercase; 
+        color: var(--text-muted); 
+        background: var(--card-bg); 
+        overflow: hidden;
+        padding: 0 2px;
+    }
+    
+    .calendar-hour-cell { 
+        height: var(--hour-h, 44px); 
+        border-bottom: 1px solid var(--border-color); 
+        position: relative; 
+        box-sizing: border-box; 
+    }
+    
+    .calendar-time-label {
+        position: absolute;
+        top: -8px;
+        right: 3px;
+        font-size: 0.64rem;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-muted);
+        letter-spacing: -0.02em;
+    }
+    
+    .calendar-event { 
+        position: absolute; 
+        border-radius: 5px; 
+        padding: 3px 4px 14px 4px; 
+        color: #ffffff; 
+        overflow: hidden; 
+        cursor: pointer; 
+        box-shadow: 0 1px 4px rgba(0,0,0,0.28); 
+        z-index: 10; 
+        box-sizing: border-box;
+        transition: transform 0.12s ease, filter 0.12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .calendar-event:hover {
+        transform: scale(1.02);
+        z-index: 15;
+        filter: brightness(1.1);
+    }
+    
+    .calendar-event.canceled { 
+        background: #201111 !important; 
+        border: 1.5px dashed var(--danger-color) !important; 
+        color: var(--danger-color) !important; 
+        text-decoration: line-through; 
+        opacity: 0.75; 
+    }
+
+    .current-time-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background-color: var(--danger-color);
+        z-index: 18;
+        pointer-events: none;
+    }
+    .current-time-line::before {
+        content: '';
+        position: absolute;
+        left: -3px;
+        top: -3px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: var(--danger-color);
+    }
+
+    .calendar-event-title {
+        font-size: 0.68rem;
+        line-height: 1.15;
+        font-weight: 600;
+        color: #ffffff;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 3;
+        -webkit-box-orient: vertical;
+        word-break: break-word;
+        hyphens: auto;
+    }
+
+    .usos-event-type-badge {
+        font-weight: 700;
+        opacity: 0.9;
+        margin-left: 2px;
+        font-size: 0.62rem;
+        text-transform: uppercase;
+    }
+
+    .usos-event-group-badge {
+        font-weight: 600;
+        opacity: 0.85;
+        margin-left: 2px;
+        font-size: 0.60rem;
+    }
+
+    .usos-event-room {
+        position: absolute;
+        right: 2px;
+        bottom: 2px;
+        font-size: 0.60rem;
+        font-weight: 700;
+        line-height: 1;
+        padding: 1.5px 3.5px;
+        border-radius: 3px;
+        max-width: calc(100% - 4px);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+        color: #ffffff;
+    }
+
+    .usos-calendar-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        margin-top: 8px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius);
+        font-size: 0.78rem;
+        color: var(--text-muted);
+    }
+
+    .usos-footer-sync {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        transition: color var(--transition);
+        user-select: none;
+    }
+    .usos-footer-sync:hover {
+        color: var(--primary-color);
+    }
+
+    .usos-footer-badge {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid var(--border-color);
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-weight: 600;
+        font-size: 0.74rem;
+        color: var(--text-main);
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* Desktop adaptations */
+    @@media (min-width: 768px) {
+        .calendar-time-col {
+            width: 52px !important;
+            min-width: 52px !important;
+        }
+        .calendar-time-label {
+            font-size: 0.72rem;
+            right: 6px;
+        }
+        .calendar-day-name {
+            font-size: 0.74rem;
+        }
+        .calendar-day-num {
+            font-size: 0.90rem;
+        }
+        .calendar-event-title {
+            font-size: 0.76rem;
+            -webkit-line-clamp: 4;
+        }
+        .usos-event-room {
+            font-size: 0.66rem;
+            padding: 2px 5px;
+        }
+        .compact-weekend-col {
+            flex: 0 0 32px !important;
+            min-width: 32px !important;
+            max-width: 32px !important;
+        }
+    }
+
+    .week-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: var(--card-bg);
+        padding: 8px 14px;
+        border-radius: var(--radius);
+        margin-bottom: 18px;
+        border: 1px solid var(--border-color);
+    }
+
+    .week-nav-btn {
+        background: transparent;
+        border: 1px solid var(--border-color);
+        color: var(--text-main);
+        width: 36px;
+        height: 36px;
+        border-radius: 9px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all var(--transition);
+    }
+
+    .week-nav-btn:hover {
+        background: var(--hover-bg);
+        border-color: var(--card-border-hover);
+    }
+
+    .week-nav-btn svg {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+    }
+
+    .week-info {
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .week-dates {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: var(--text-main);
+        letter-spacing: -0.01em;
+    }
+
+    .week-badge {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        font-weight: 500;
+    }
+
+    .godmode-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(249, 115, 22, 0.12);
+        border: 1px solid rgba(249, 115, 22, 0.3);
+        padding: 5px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        user-select: none;
+        color: var(--color-starosta);
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .godmode-toggle:hover {
+        background: rgba(249, 115, 22, 0.2);
+    }
+    .godmode-toggle.active {
+        background: var(--color-starosta);
+        border-color: var(--color-starosta);
+        color: white;
+        box-shadow: 0 2px 8px rgba(249, 115, 22, 0.35);
+    }
+    .godmode-toggle input {
+        display: none;
+    }
+
+    /* Flow Grid & Flow List */
+    .schedule-flow-grid {
+        display: grid !important;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)) !important;
+        gap: 14px !important;
+        width: 100% !important;
+    }
+
+    .schedule-flow-list {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 12px !important;
+        width: 100% !important;
+    }
+
+    /* Day Selector Pills Bar (Wszystko / Dni tygodnia na PC, Mac i Mobile) */
+    /* Day Selector Pills Bar (Wszystko / Dni tygodnia) */
+    .day-selector-bar, .mobile-day-bar {
+        display: flex !important;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        align-items: center;
+        width: 100%;
+        margin-bottom: 6px;
+    }
+    .day-selector-bar::-webkit-scrollbar, .mobile-day-bar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .day-pill, .mobile-day-pill {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        text-align: center;
+        cursor: pointer;
+        transition: all var(--transition);
+        -webkit-tap-highlight-color: transparent;
+        user-select: none;
+    }
+    .day-pill:hover, .mobile-day-pill:hover {
+        background: var(--hover-bg);
+        border-color: var(--card-border-hover);
+        transform: translateY(-1px);
+    }
+    .day-pill.active, .mobile-day-pill.active {
+        background: var(--primary-color) !important;
+        border-color: var(--primary-color) !important;
+        color: #ffffff !important;
+        box-shadow: 0 4px 12px var(--primary-glow);
+    }
+    .day-pill.active:hover, .mobile-day-pill.active:hover {
+        transform: none;
+    }
+    .day-pill .day-abbr, .mobile-day-pill .day-abbr {
+        font-weight: 600;
+        text-transform: uppercase;
+        color: inherit;
+        opacity: 0.85;
+    }
+    .day-pill .day-date, .mobile-day-pill .day-date {
+        font-weight: 700;
+        margin-top: 2px;
+        color: inherit;
+    }
+
+    /* Desktop / Mac / PC - Wyśrodkowanie dni */
+    @@media (min-width: 768px) {
+        .day-selector-bar, .mobile-day-bar {
+            justify-content: center !important;
+            gap: 12px !important;
+            padding: 4px 0 16px 0 !important;
+        }
+        .day-pill, .mobile-day-pill {
+            flex: 0 1 105px !important;
+            min-width: 80px !important;
+            max-width: 115px !important;
+            padding: 8px 10px !important;
+        }
+        .day-pill .day-abbr, .mobile-day-pill .day-abbr {
+            font-size: 0.74rem;
+        }
+        .day-pill .day-date, .mobile-day-pill .day-date {
+            font-size: 0.96rem;
+        }
+    }
+
+    /* Mobile - Dopasowanie do szerokości ekranu, płynne przewijanie */
+    @@media (max-width: 767px) {
+        .day-selector-bar, .mobile-day-bar {
+            justify-content: flex-start !important;
+            gap: 6px !important;
+            padding: 4px 0 14px 0 !important;
+        }
+        .day-pill, .mobile-day-pill {
+            flex: 1 1 0 !important;
+            min-width: 48px !important;
+            max-width: none !important;
+            padding: 7px 4px !important;
+        }
+        .day-pill .day-abbr, .mobile-day-pill .day-abbr {
+            font-size: 0.70rem;
+        }
+        .day-pill .day-date, .mobile-day-pill .day-date {
+            font-size: 0.90rem;
+        }
+    }
+
+    .week-badge-clickable {
+        cursor: pointer;
+        user-select: none;
+        transition: all 0.2s ease;
+        padding: 2px 8px;
+        border-radius: 6px;
+    }
+    .week-badge-clickable:hover {
+        background: var(--hover-bg);
+        color: var(--primary-color);
+    }
+
+    /* ANIMACJE ŁADOWANIA I SKELETON SCREEN (KALENDARZ & GOD MODE) */
+    .skeleton-card {
+        background: linear-gradient(90deg, var(--card-bg) 25%, var(--border-color) 50%, var(--card-bg) 75%);
+        background-size: 200% 100%;
+        animation: skeletonPulse 1.5s infinite ease-in-out;
+        border-radius: var(--radius);
+        border: 1px solid var(--border-color);
+        margin-bottom: 12px;
+    }
+
+    .skeleton-bar {
+        background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.14) 50%, rgba(255,255,255,0.05) 75%);
+        background-size: 200% 100%;
+        animation: skeletonPulse 1.5s infinite ease-in-out;
+    }
+
+    @@keyframes skeletonPulse {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+    }
+
+    .schedule-loading-progress-bar {
+        position: relative;
+        width: 100%;
+        height: 3px;
+        background: rgba(10, 132, 255, 0.15);
+        border-radius: 2px;
+        overflow: hidden;
+        margin: 4px 0 12px 0;
+    }
+    .schedule-loading-progress-bar::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        bottom: 0;
+        width: 40%;
+        background: linear-gradient(90deg, transparent, var(--primary-color), var(--color-starosta), transparent);
+        border-radius: 2px;
+        animation: loadingIndeterminate 1.2s infinite ease-in-out;
+    }
+
+    @@keyframes loadingIndeterminate {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+    }
+
+    .schedule-loading-banner {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 8px 16px;
+        background: rgba(10, 132, 255, 0.08);
+        border: 1px solid rgba(10, 132, 255, 0.22);
+        border-radius: 10px;
+        color: var(--primary-color);
+        font-size: 0.84rem;
+        font-weight: 600;
+        margin-bottom: 12px;
+        animation: fadeIn 0.25s ease;
+    }
+
+    .offline-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        background: rgba(255, 69, 58, 0.12);
+        border: 1px solid rgba(255, 69, 58, 0.35);
+        border-radius: 12px;
+        padding: 10px 16px;
+        margin-bottom: 14px;
+        color: var(--text-main);
+        font-size: 0.88rem;
+        animation: fadeIn 0.3s ease-out;
+    }
+    .offline-banner-content {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .offline-icon {
+        width: 18px;
+        height: 18px;
+        stroke: var(--danger-color);
+        flex-shrink: 0;
+    }
+    .offline-time {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-left: 4px;
+    }
+    .offline-badge {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        background: rgba(255, 69, 58, 0.2);
+        color: var(--danger-color);
+        border: 1px solid rgba(255, 69, 58, 0.4);
+        padding: 2px 8px;
+        border-radius: 6px;
+        white-space: nowrap;
+    }
+
+    @@keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+
+<div class="schedule-page-wrapper">
+    <div class="schedule-header-row" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; flex-wrap: wrap; gap: 12px;">
+        <div>
+            <h1 style="margin: 0; color: var(--text-main); font-size: 1.75rem; font-weight: 700; letter-spacing: -0.025em;">
+                @(CurrentLang == "en-US" ? "Timetable" : "Plan Zajęć")
+            </h1>
+        </div>
+        <div class="schedule-controls" style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 9px; font-weight: 600; font-size: 0.85rem; height: 34px; box-shadow: 0 2px 6px rgba(10, 132, 255, 0.25);" @onclick="OpenAddEventModal" title='@(CurrentLang == "en-US" ? "Add personal or group event" : "Dodaj wydarzenie osobiste lub grupy")'>
+                <span style="font-size: 1.15rem; font-weight: bold; line-height: 1;">+</span>
+                <span>@(CurrentLang == "en-US" ? "Event" : "Wydarzenie")</span>
+            </button>
+            <button class="btn" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 9px; font-weight: 600; font-size: 0.85rem; height: 34px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border-color); color: var(--text-main);" @onclick="OpenExportModal" title='@(CurrentLang == "en-US" ? "Export to Calendar (.ics)" : "Eksportuj do Kalendarza (.ics)")'>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 14px; height: 14px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <span>@(CurrentLang == "en-US" ? "Export" : "Eksportuj")</span>
+            </button>
+            <button class="btn" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 9px; font-weight: 600; font-size: 0.85rem; height: 34px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border-color); color: var(--text-main);" @onclick="ForceRefreshScheduleAsync" disabled="@isLoading" title='@(CurrentLang == "en-US" ? "Refresh timetable from USOS" : "Odśwież plan z USOS")'>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="@(isLoading ? "spin" : "")" style="width: 14px; height: 14px;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                <span>@(CurrentLang == "en-US" ? "Refresh" : "Odśwież")</span>
+            </button>
+            @if (AppState.HasManagementPrivileges)
+            {
+                <label class="godmode-toggle @(IsGodMode ? "active" : "")" title='@(CurrentLang == "en-US" ? "Show schedule of all groups in your cohort" : "Pokaż plan wszystkich grup na twoim roku")'>
+                    <input type="checkbox" @bind="IsGodMode" @bind:after="OnGodModeToggled" />
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width: 13px; height: 13px;"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    <span class="label-text">God Mode</span>
+                </label>
+            }
+            <div class="segmented-control">
+                <button class="@(!ShowModified ? "active" : "")" @onclick="ToggleModified">USOS</button>
+                <button class="@(ShowModified ? "active" : "")" @onclick="ToggleModified">@(CurrentLang == "en-US" ? "Changes" : "Zmiany")</button>
+            </div>
+            <div class="segmented-control">
+                <button class="@(CurrentView == "List" ? "active" : "")" @onclick="SwitchToList">@(CurrentLang == "en-US" ? "List" : "Lista")</button>
+                <button class="desktop-only @(CurrentView == "Grid" ? "active" : "")" @onclick="SwitchToGrid">@(CurrentLang == "en-US" ? "Grid" : "Siatka")</button>
+                <button class="@(CurrentView == "Calendar" ? "active" : "")" @onclick="SwitchToCalendar">@(CurrentLang == "en-US" ? "Calendar" : "Kalendarz")</button>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(scheduleErrorMessage))
+    {
+        <div class="schedule-error-banner" style="background: rgba(255, 69, 58, 0.12); border: 1px solid rgba(255, 69, 58, 0.35); border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-main); font-size: 0.88rem;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.3rem;">⚠️</span>
+                <div>
+                    <strong>@(CurrentLang == "en-US" ? "USOS Sync Issue" : "Błąd pobierania z USOS"):</strong>
+                    <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 2px;">@scheduleErrorMessage</div>
+                </div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                @if (hasAuthError)
+                {
+                    <button class="btn btn-sm btn-primary" style="padding: 4px 10px; font-size: 0.8rem; border-radius: 7px;" @onclick="NavigateToLogin">
+                        @(CurrentLang == "en-US" ? "Sign In Again" : "Zaloguj ponownie")
+                    </button>
+                }
+                <button class="btn btn-sm btn-secondary" style="padding: 4px 10px; font-size: 0.8rem; border-radius: 7px; border: 1px solid var(--border-color);" @onclick="ForceRefreshScheduleAsync" disabled="@isLoading">
+                    @(CurrentLang == "en-US" ? "Retry" : "Spróbuj ponownie")
+                </button>
+            </div>
+        </div>
+    }
+
+    @if (isOffline)
+    {
+        <div class="offline-banner">
+            <div class="offline-banner-content">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="offline-icon">
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                    <path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55" />
+                    <path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39" />
+                    <path d="M10.71 5.05A16 16 0 0 1 22.58 9" />
+                    <path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88" />
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+                    <line x1="12" y1="20" x2="12.01" y2="20" />
+                </svg>
+                <div>
+                    <strong>@(CurrentLang == "en-US" ? "Offline Mode" : "Tryb Offline")</strong>: 
+                    <span>@(CurrentLang == "en-US" ? "Displaying locally cached timetable" : "Wyświetlasz plan z pamięci podręcznej")</span>
+                    @if (ScheduleService.LastUsosFetchTime.HasValue)
+                    {
+                        <span class="offline-time">
+                            (@(CurrentLang == "en-US" ? "Cached" : "Zapisano"): @ScheduleService.LastUsosFetchTime.Value.ToLocalTime().ToString("dd.MM HH:mm"))
+                        </span>
+                    }
+                </div>
+            </div>
+            <span class="offline-badge">@(CurrentLang == "en-US" ? "Cache" : "Offline")</span>
+        </div>
+    }
+
+    @if (IsGodMode)
+    {
+        <div style="background: rgba(255, 159, 10, 0.12); border: 1px solid rgba(255, 159, 10, 0.35); border-radius: 12px; padding: 10px 16px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-main); font-size: 0.88rem;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 1.2rem;">⚡</span>
+                <span><strong>God Mode:</strong> @(CurrentLang == "en-US" ? "Viewing timetable for all cohort groups." : "Przeglądasz plan wszystkich grup na swoim roku.")</span>
+            </div>
+            @if (isGodModeLoading || isLoading)
+            {
+                <div style="display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 0.82rem; color: var(--warning-color);">
+                    <div style="width: 14px; height: 14px; border: 2px solid var(--warning-color); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                    <span>@(CurrentLang == "en-US" ? "Loading cohort..." : "Pobieranie grup...")</span>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Pasek przełączania tygodnia (Week Navigation Bar) -->
+    <div class="week-bar">
+        <button class="week-nav-btn" @onclick="PrevWeek" aria-label="Poprzedni tydzień" title='@(CurrentLang == "en-US" ? "Previous week" : "Poprzedni tydzień")'>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        
+        <div class="week-info">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 6px;">
+                <span class="week-dates" style="text-transform: lowercase;">
+                    @ScheduleLogic.GetWeekDisplayName(CurrentWeekStart, DateTime.Today, CurrentLang)
+                </span>
+                @if (IsCurrentWeek)
+                {
+                    <span style="font-size: 0.68rem; vertical-align: middle; padding: 2px 7px; background: rgba(10, 132, 255, 0.15); color: var(--primary-color); border-radius: 6px; font-weight: 700; text-transform: uppercase;">
+                        @(CurrentLang == "en-US" ? "CURRENT" : "BIEŻĄCY")
+                    </span>
+                }
+            </div>
+            <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <span style="font-size: 0.78rem; color: var(--text-muted); font-weight: 500;">
+                    @CurrentWeekStart.ToString("dd.MM") – @CurrentWeekStart.AddDays(DaysToDisplay - 1).ToString("dd.MM")
+                </span>
+                <span style="color: var(--text-muted); opacity: 0.5;">•</span>
+                <span class="week-badge" title='@(CurrentLang == "en-US" ? "Click to toggle week parity (Auto / Invert / Even / Odd)" : "Kliknij, aby przełączyć parzystość tygodnia")'>
+                    @(IsEvenWeek ? (CurrentLang == "en-US" ? "Even week" : "Tydzień parzysty") : (CurrentLang == "en-US" ? "Odd week" : "Tydzień nieparzysty"))
+                </span>
+                @if (!IsCurrentWeek)
+                {
+                    <button class="btn btn-sm" style="padding: 1px 8px; font-size: 0.72rem; border-radius: 5px; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--primary-color); cursor: pointer;" @onclick="JumpToToday">
+                        @(CurrentLang == "en-US" ? "Today" : "Dzisiaj")
+                    </button>
+                }
+            </div>
+        </div>
+
+        <button class="week-nav-btn" @onclick="NextWeek" aria-label="Następny tydzień" title='@(CurrentLang == "en-US" ? "Next week" : "Następny tydzień")'>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+    </div>
+
+    @if (CurrentView != "Calendar")
+    {
+        <!-- Przełącznik dni (Pill Switcher na Mobile i Mac/PC - widoczny w liście i siatce) -->
+        <div class="day-selector-bar mobile-day-bar">
+            <div class="day-pill mobile-day-pill @(!SelectedMobileDayIndex.HasValue ? "active" : "")" @onclick="SelectAllDays" title='@(CurrentLang == "en-US" ? "Show all week" : "Pokaż cały tydzień")'>
+                <div class="day-abbr">@(CurrentLang == "en-US" ? "All" : "Wsz")</div>
+                <div class="day-date">📅</div>
+            </div>
+            @for (int i = 0; i < DaysToDisplay; i++)
+            {
+                var dayIdx = i;
+                var dayDate = CurrentWeekStart.AddDays(dayIdx);
+                var isSelected = SelectedMobileDayIndex == dayIdx;
+                <div class="day-pill mobile-day-pill @(isSelected ? "active" : "")" @onclick="() => SelectMobileDay(dayIdx)" title="@GetDayName(dayDate.DayOfWeek)">
+                    <div class="day-abbr">@GetDayNameShort(dayDate.DayOfWeek)</div>
+                    <div class="day-date">@dayDate.ToString("dd")</div>
+                </div>
+            }
+        </div>
+    }
+
+    @* --- 1. SKELETON SCREEN (ŁADOWANIE OKIENEK PLANU ZAJĘĆ) --- *@
+    @if (isLoading || isGodModeLoading)
+    {
+        <div style="display: flex; flex-direction: column; gap: 14px; margin-top: 4px;">
+            <div class="schedule-loading-progress-bar"></div>
+            <div class="schedule-loading-banner">
+                <div style="width: 14px; height: 14px; border: 2px solid var(--primary-color); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <span>@(isGodModeLoading 
+                    ? (CurrentLang == "en-US" ? "⚡ Loading God Mode cohort timetable..." : "⚡ Pobieranie grup rocznika (God Mode)...") 
+                    : (CurrentLang == "en-US" ? "📅 Updating timetable from USOS..." : "📅 Pobieranie aktualnego planu zajęć..."))</span>
+            </div>
+
+            <div class="skeleton-card" style="padding: 18px 16px; border-radius: var(--radius); height: 112px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="skeleton-bar" style="width: 72px; height: 20px; border-radius: 6px;"></div>
+                    <div class="skeleton-bar" style="width: 95px; height: 16px; border-radius: 4px;"></div>
+                </div>
+                <div class="skeleton-bar" style="width: 55%; height: 20px; border-radius: 6px; margin: 6px 0;"></div>
+                <div style="display: flex; gap: 16px;">
+                    <div class="skeleton-bar" style="width: 100px; height: 15px; border-radius: 4px;"></div>
+                    <div class="skeleton-bar" style="width: 140px; height: 15px; border-radius: 4px;"></div>
+                </div>
+            </div>
+            <div class="skeleton-card" style="padding: 18px 16px; border-radius: var(--radius); height: 112px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="skeleton-bar" style="width: 64px; height: 20px; border-radius: 6px;"></div>
+                    <div class="skeleton-bar" style="width: 95px; height: 16px; border-radius: 4px;"></div>
+                </div>
+                <div class="skeleton-bar" style="width: 45%; height: 20px; border-radius: 6px; margin: 6px 0;"></div>
+                <div style="display: flex; gap: 16px;">
+                    <div class="skeleton-bar" style="width: 110px; height: 15px; border-radius: 4px;"></div>
+                    <div class="skeleton-bar" style="width: 130px; height: 15px; border-radius: 4px;"></div>
+                </div>
+            </div>
+            <div class="skeleton-card" style="padding: 18px 16px; border-radius: var(--radius); height: 112px; display: flex; flex-direction: column; justify-content: space-between;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <div class="skeleton-bar" style="width: 80px; height: 20px; border-radius: 6px;"></div>
+                    <div class="skeleton-bar" style="width: 95px; height: 16px; border-radius: 4px;"></div>
+                </div>
+                <div class="skeleton-bar" style="width: 65%; height: 20px; border-radius: 6px; margin: 6px 0;"></div>
+                <div style="display: flex; gap: 16px;">
+                    <div class="skeleton-bar" style="width: 90px; height: 15px; border-radius: 4px;"></div>
+                    <div class="skeleton-bar" style="width: 160px; height: 15px; border-radius: 4px;"></div>
+                </div>
+            </div>
+        </div>
+    }
+    @* --- 2. EMPTY STATE (JEŚLI NIE MA DANYCH I SKOŃCZYŁO ŁADOWAĆ) --- *@
+    else if (!LessonsInWeek.Any())
+    {
+        <div class="empty-state-card" style="padding: 48px 20px;">
+            <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <h3 class="empty-state-title">
+                @(CurrentLang == "en-US" ? "No classes this week!" : "Brak zajęć w tym tygodniu!")
+            </h3>
+            <p class="empty-state-subtitle">
+                @(CurrentLang == "en-US" ? "All clear. Relax or refresh from USOS to check for updates." : "Brak zajęć w wybranym tygodniu. Odpoczywaj lub pobierz świeży plan z USOS.")
+            </p>
+            <div style="display: flex; gap: 10px; justify-content: center; margin-top: 14px; flex-wrap: wrap;">
+                <button class="btn btn-secondary" style="font-weight: 600; padding: 8px 18px; border-radius: 9px; border: 1px solid var(--border-color); cursor: pointer;" @onclick="ForceRefreshScheduleAsync" disabled="@isLoading">
+                    🔄 @(CurrentLang == "en-US" ? "Refresh from USOS" : "Pobierz z USOS")
+                </button>
+                <button class="btn btn-primary" style="font-weight: 600; padding: 8px 18px; border-radius: 9px;" @onclick="OpenAddEventModal">
+                    + @(CurrentLang == "en-US" ? "Add Event" : "Dodaj wydarzenie do planu")
+                </button>
+            </div>
+        </div>
+    }
+    @* --- 3. WŁAŚCIWA TREŚĆ KALENDARZA --- *@
+    else
+    {
+        @if (CurrentView == "Calendar")
+        {
+            var hasWeekendClasses = LessonsInWeek.Any(l => {
+                var d = ShowModified ? l.Start.DayOfWeek : (l.OriginalStart != default ? l.OriginalStart.DayOfWeek : l.Start.DayOfWeek);
+                return d == DayOfWeek.Saturday || d == DayOfWeek.Sunday;
+            });
+
+            <div class="calendar-container" style="--hour-h: @(CalendarHourHeight)px;">
+                <div class="calendar-time-col">
+                    <div class="calendar-header">
+                        <span>@(CurrentLang == "en-US" ? "Hour" : "Godz")</span>
+                    </div>
+                    @for (int hour = StartHour; hour <= EndHour; hour++)
+                    {
+                        <div class="calendar-hour-cell"><span class="calendar-time-label">@(hour < 10 ? $"0{hour}:00" : $"{hour}:00")</span></div>
+                    }
+                </div>
+                
+                @for (int i = 0; i < 7; i++)
+                {
+                    var currentDate = CurrentWeekStart.AddDays(i);
+                    bool isSaturday = currentDate.DayOfWeek == DayOfWeek.Saturday;
+                    bool isSunday = currentDate.DayOfWeek == DayOfWeek.Sunday;
+                    bool isWeekend = isSaturday || isSunday;
+                    bool isToday = currentDate.Date == DateTime.Today;
+                    bool isCompactWeekend = isWeekend && !hasWeekendClasses && !isToday;
+                    var calendarEvents = GetCalendarEvents(currentDate);
+
+                    <div class="calendar-day-col @(isCompactWeekend ? "compact-weekend-col" : "")">
+                        <div class="calendar-header">
+                            @if (isCompactWeekend)
+                            {
+                                <span>@ScheduleLogic.GetUsosDayName(currentDate.DayOfWeek, true, CurrentLang)</span>
+                            }
+                            else
+                            {
+                                <div class="calendar-day-name">@ScheduleLogic.GetUsosDayName(currentDate.DayOfWeek, false, CurrentLang)</div>
+                                <div class="calendar-day-num @(isToday ? "today-number" : "")">@currentDate.ToString("dd")</div>
+                            }
+                        </div>
+                        
+                        @for (int hour = StartHour; hour <= EndHour; hour++)
+                        {
+                            <div class="calendar-hour-cell"></div>
+                        }
+
+                        @if (isToday)
+                        {
+                            var now = DateTime.Now;
+                            var nowPx = CalendarHeaderHeight + (now.Hour - StartHour) * CalendarHourHeight + (int)(now.Minute * CalendarHourHeight / 60.0);
+                            
+                            if (nowPx >= CalendarHeaderHeight && nowPx <= CalendarHeaderHeight + ((EndHour - StartHour + 1) * CalendarHourHeight))
+                            {
+                                <div class="current-time-line" style="top: @(nowPx)px;"></div>
+                            }
+                        }
+
+                        @foreach (var r in calendarEvents)
+                        {
+                            var ev = r.Lesson;
+                            var actPlace = ShowModified ? ev.Place : (!string.IsNullOrEmpty(ev.OriginalPlace) ? ev.OriginalPlace : ev.Place);
+                            var isCanceled = ShowModified && ev.IsCanceled;
+                            var actStart = ShowModified ? ev.Start : (ev.OriginalStart != default ? ev.OriginalStart : ev.Start);
+                            var actEnd = ShowModified ? ev.End : (ev.OriginalEnd != default ? ev.OriginalEnd : ev.End);
+                            
+                            var topPx = CalendarHeaderHeight + (r.EffectiveStart.Hour - StartHour) * CalendarHourHeight + (int)(r.EffectiveStart.Minute * CalendarHourHeight / 60.0);
+                            var heightPx = Math.Max(26, (int)((r.EffectiveEnd - r.EffectiveStart).TotalMinutes * (CalendarHourHeight / 60.0)));
+                            var colorTuple = ScheduleLogic.GetCalendarEventColor(ev.Type, ev.IsHighPriority, ev.IsPersonal);
+                            var compactRoom = ScheduleLogic.GetCompactRoom(actPlace);
+
+                            var widthPct = 100.0 / r.TotalColumns;
+                            var leftPct = r.Column * widthPct;
+
+                            <div class="calendar-event @(isCanceled ? "canceled" : "")" 
+                                 style="top: @(topPx)px; height: @(heightPx)px; left: calc(@(leftPct)% + 1px); width: calc(@(widthPct)% - 2px); background-color: @(isCanceled ? "var(--bg-color)" : colorTuple.Background); border: 1px solid @(isCanceled ? "var(--danger-color)" : colorTuple.Border);"
+                                 @onclick="() => OpenLessonModal(ev)"
+                                 title="@ev.Title (@ev.Type) @actStart.ToString("HH:mm")–@actEnd.ToString("HH:mm") @actPlace">
+                                <div class="calendar-event-title">
+                                    <span>@ev.Title</span>
+                                    <span class="usos-event-type-badge">@ev.Type</span>
+                                    @if (!string.IsNullOrWhiteSpace(ev.Group)) 
+                                    { 
+                                        <span class="usos-event-group-badge">(@ev.Group)</span> 
+                                    }
+                                    @if (ev.HasExam && ShowModified) { <span title="KOLOKWIUM">🚨</span> }
+                                    @if (ev.HasTask && ShowModified) { <span title="ZADANIE">📝</span> }
+                                    @if (ev.IsHighPriority && !ev.HasExam && ShowModified) { <span title="WAŻNE">❗</span> }
+                                </div>
+                                @if (!string.IsNullOrEmpty(compactRoom))
+                                {
+                                    <div class="usos-event-room" style="background: @colorTuple.RoomBadgeBg;">
+                                         @compactRoom
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            <!-- Dolna belka statusu USOS (Mobile Status Footer) -->
+            <div class="usos-calendar-footer">
+                <div class="usos-footer-sync" @onclick="ForceRefreshScheduleAsync" role="button" tabindex="0" title='@(CurrentLang == "en-US" ? "Tap to refresh USOS timetable" : "Dotknij, aby odświeżyć plan z USOS")'>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="@(isLoading ? "spin" : "")" style="width: 14px; height: 14px; flex-shrink: 0;"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                    <span>
+                        @if (ScheduleService.LastUsosFetchTime.HasValue)
+                        {
+                            @(CurrentLang == "en-US" 
+                                ? $"Checked USOS at {ScheduleService.LastUsosFetchTime.Value.ToLocalTime():HH:mm}" 
+                                : $"Sprawdzono w USOS o {ScheduleService.LastUsosFetchTime.Value.ToLocalTime():HH:mm}")
+                        }
+                        else
+                        {
+                            @(CurrentLang == "en-US" ? "Synchronized with USOS" : "Zsynchronizowano z USOS")
+                        }
+                    </span>
+                </div>
+                <div class="usos-footer-badge">
+                    @CurrentWeekStart.ToString("dd/MM") – @CurrentWeekStart.AddDays(6).ToString("dd/MM")
+                </div>
+            </div>
+        }
+        else
+        {
+            <div>
+                @for (int i = 0; i < DaysToDisplay; i++)
+                {
+                    if (SelectedMobileDayIndex.HasValue && SelectedMobileDayIndex.Value != i)
+                    {
+                        continue;
+                    }
+                    var currentDate = CurrentWeekStart.AddDays(i);
+                    var dailyLessons = GetLessonsForDay(currentDate).ToList();
+                    
+                    @if (dailyLessons.Any())
+                    {
+                        <div style="margin-bottom: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 14px;">
+                                <h2 style="font-size: 1.15rem; font-weight: 700; margin: 0; color: var(--text-main);">
+                                    @GetDayName(currentDate.DayOfWeek) <span style="font-size: 0.85em; font-weight: normal; color: var(--text-muted); margin-left: 6px;">@currentDate.ToString("dd.MM")</span>
+                                </h2>
+                                @if (SelectedMobileDayIndex.HasValue)
+                                {
+                                    <button class="btn btn-sm" style="font-size: 0.78rem; padding: 3px 10px; border-radius: 6px; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--primary-color);" @onclick="() => SelectedMobileDayIndex = null">
+                                        @(CurrentLang == "en-US" ? "Show all week" : "Pokaż cały tydzień")
+                                    </button>
+                                }
+                            </div>
+
+                            <div class="@(CurrentView == "Grid" ? "schedule-flow-grid" : "schedule-flow-list")">
+                                @foreach (var ev in dailyLessons)
+                                {
+                                    var actStart = ShowModified ? ev.Start : (ev.OriginalStart != default ? ev.OriginalStart : ev.Start);
+                                    var actEnd = ShowModified ? ev.End : (ev.OriginalEnd != default ? ev.OriginalEnd : ev.End);
+                                    var actPlace = ShowModified ? ev.Place : (!string.IsNullOrEmpty(ev.OriginalPlace) ? ev.OriginalPlace : ev.Place);
+                                    var isCanceled = ShowModified && ev.IsCanceled;
+                                    var bColor = GetBorderColor(ev);
+
+                                    <div class="event-widget" style="border-left-color: @(isCanceled ? "var(--danger-color)" : bColor); opacity: @(isCanceled ? "0.65" : "1");"
+                                         @onclick="() => OpenLessonModal(ev)">
+                                        <div>
+                                            <div class="event-top-bar">
+                                                <div class="event-badges-group">
+                                                    <span class="type-pill" style="background-color: @(isCanceled ? "rgba(255, 69, 58, 0.15)" : "rgba(10, 132, 255, 0.15)"); color: @(isCanceled ? "var(--danger-color)" : bColor);">
+                                                        @(isCanceled ? (CurrentLang == "en-US" ? "CANCELLED" : "ODWOŁANE") : ev.Type)
+                                                    </span>
+                                                    @if (!string.IsNullOrWhiteSpace(ev.Group))
+                                                    {
+                                                        <span class="type-pill" style="background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); font-weight: 600;">
+                                                            Gr. @ev.Group
+                                                        </span>
+                                                    }
+                                                    @if(ev.HasExam && ShowModified) { <span class="status-pill" style="background: rgba(255, 69, 58, 0.15); color: var(--danger-color);">🚨 @(CurrentLang == "en-US" ? "Exam" : "Kolos")</span> }
+                                                    @if(ev.HasTask && ShowModified) { <span class="status-pill" style="background: rgba(255, 159, 10, 0.15); color: var(--warning-color);">📝 @(CurrentLang == "en-US" ? "Task" : "Zadanie")</span> }
+                                                    @if(ev.IsHighPriority && !ev.HasExam && ShowModified) { <span class="status-pill" style="background: rgba(255, 69, 58, 0.15); color: var(--danger-color);">@(CurrentLang == "en-US" ? "Important" : "Ważne")</span> }
+                                                </div>
+                                                @if (actEnd.Date > actStart.Date)
+                                                {
+                                                    <span class="group-tag" style="background: rgba(191, 90, 242, 0.15); color: #BF5AF2; font-weight: 600;">
+                                                        @actStart.ToString("dd.MM HH:mm") – @actEnd.ToString("dd.MM HH:mm")
+                                                    </span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="group-tag">@actStart.ToString("HH:mm") – @actEnd.ToString("HH:mm")</span>
+                                                }
+                                            </div>
+                                            
+                                            <h3 class="event-main-title" style="text-decoration: @(isCanceled ? "line-through" : "none");">@ev.Title</h3>
+                                        </div>
+                                        
+                                        <div class="event-bottom-meta">
+                                            <span class="meta-item">
+                                                <svg class="meta-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                                <span>@actPlace</span>
+                                            </span>
+                                            @if (!string.IsNullOrWhiteSpace(ev.Group))
+                                            {
+                                                <span class="meta-item">
+                                                    <svg class="meta-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                                    <span>Gr. @ev.Group</span>
+                                                </span>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(ev.Person))
+                                            {
+                                                <span class="meta-item meta-item-person" title="@ev.Person">
+                                                    <svg class="meta-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                                                    <span style="word-break: break-word;">@ev.Person</span>
+                                                </span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else if (SelectedMobileDayIndex.HasValue && SelectedMobileDayIndex.Value == i)
+                    {
+                        <div class="empty-state-card" style="padding: 32px 16px; margin-bottom: 24px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 16px;">
+                                <h2 style="font-size: 1.15rem; font-weight: 700; margin: 0; color: var(--text-main);">
+                                    @GetDayName(currentDate.DayOfWeek) <span style="font-size: 0.85em; font-weight: normal; color: var(--text-muted); margin-left: 6px;">@currentDate.ToString("dd.MM")</span>
+                                </h2>
+                                <button class="btn btn-sm" style="font-size: 0.78rem; padding: 4px 10px; border-radius: 6px; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--primary-color);" @onclick="() => SelectedMobileDayIndex = null">
+                                    @(CurrentLang == "en-US" ? "Show all week" : "Pokaż cały tydzień")
+                                </button>
+                            </div>
+                            <p style="color: var(--text-muted); margin: 0;">
+                                @(CurrentLang == "en-US" ? "No classes scheduled for this day." : "Brak zaplanowanych zajęć w tym dniu.")
+                            </p>
+                        </div>
+                    }
+                }
+            </div>
+        }
+    }
+</div>
+
+@* Modals *@
+@if (IsLessonModalOpen && SelectedLesson != null)
+{
+    var bColor = GetBorderColor(SelectedLesson);
+    var actStart = ShowModified ? SelectedLesson.Start : (SelectedLesson.OriginalStart != default ? SelectedLesson.OriginalStart : SelectedLesson.Start);
+    var actEnd = ShowModified ? SelectedLesson.End : (SelectedLesson.OriginalEnd != default ? SelectedLesson.OriginalEnd : SelectedLesson.End);
+    var actPlace = ShowModified ? SelectedLesson.Place : (!string.IsNullOrEmpty(SelectedLesson.OriginalPlace) ? SelectedLesson.OriginalPlace : SelectedLesson.Place);
+
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+                <span class="type-pill" style="background-color: @bColor; color: @(SelectedLesson.Type.ToUpper() == "CW" ? "#000" : "#fff"); font-weight: 600;">@SelectedLesson.Type</span>
+                @if (SelectedLesson.IsCanceled)
+                {
+                    <span class="type-pill" style="background: rgba(255, 69, 58, 0.15); color: var(--danger-color); font-weight: 600;">
+                        @(CurrentLang == "en-US" ? "CANCELLED" : "ODWOŁANE")
+                    </span>
+                }
+                @if (SelectedLesson.IsPersonal)
+                {
+                    <span class="type-pill" style="background: rgba(10, 132, 255, 0.15); color: var(--primary-color); font-weight: 600;">
+                        @(CurrentLang == "en-US" ? "CUSTOM" : "WŁASNE")
+                    </span>
+                }
+            </div>
+
+            <h2 class="modal-title">@SelectedLesson.Title</h2>
+            
+            <div class="modal-info-box">
+                <div class="modal-info-row">
+                    <span class="modal-info-label">🕒 @(CurrentLang == "en-US" ? "Time:" : "Godzina:")</span>
+                    <span class="modal-info-value">@actStart.ToString("HH:mm") – @actEnd.ToString("HH:mm") (@actStart.ToString("dd.MM.yyyy"))</span>
+                </div>
+                <div class="modal-info-row">
+                    <span class="modal-info-label">📍 @(CurrentLang == "en-US" ? "Room:" : "Sala:")</span>
+                    <span class="modal-info-value">@actPlace</span>
+                </div>
+                <div class="modal-info-row">
+                    <span class="modal-info-label">👤 @(CurrentLang == "en-US" ? "Lecturer:" : "Wykładowca:")</span>
+                    <span class="modal-info-value">@SelectedLesson.Person</span>
+                </div>
+                <div class="modal-info-row">
+                    <span class="modal-info-label">👥 @(CurrentLang == "en-US" ? "Group:" : "Grupa:")</span>
+                    <span class="modal-info-value">Gr. @SelectedLesson.Group</span>
+                </div>
+            </div>
+            
+            @if (!string.IsNullOrEmpty(SelectedLesson.Desc))
+            {
+                <div style="background: rgba(255,255,255,0.04); padding: 12px 14px; border-radius: 10px; margin-bottom: 16px; border-left: 3px solid var(--border-color);">
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin: 0; line-height: 1.5; white-space: pre-wrap;">@SelectedLesson.Desc</p>
+                </div>
+            }
+            
+            @if (SelectedLesson.HasTask || SelectedLesson.HasExam)
+            {
+                <div style="background: rgba(255, 159, 10, 0.1); border-left: 3px solid var(--warning-color); padding: 12px 14px; border-radius: 10px; margin-bottom: 16px;">
+                    <h4 style="color: var(--warning-color); margin: 0 0 4px 0; font-size: 0.95rem;">
+                        @(SelectedLesson.HasExam 
+                            ? (CurrentLang == "en-US" ? "🚨 Exam!" : "🚨 Kolokwium!") 
+                            : (CurrentLang == "en-US" ? "📝 Homework / Task" : "📝 Zadanie domowe"))
+                    </h4>
+                    <p style="margin: 0; color: var(--text-main); font-size: 0.88rem; white-space: pre-wrap;">@SelectedLesson.TaskDetails</p>
+                </div>
+            }
+            
+            <div style="padding-top: 8px;">
+                @if (!SelectedLesson.IsCanceled && !SelectedLesson.IsPersonal)
+                {
+                    <div class="modal-actions-row" style="margin-bottom: 12px; gap: 8px;">
+                        <button class="btn btn-warning" style="flex: 1; font-weight: 600;" @onclick="OpenTaskModal">
+                            📝 @(CurrentLang == "en-US" ? "Task" : "Zadanie")
+                        </button>
+                        <button class="btn btn-danger" style="flex: 1; font-weight: 600;" @onclick="OpenExamModal">
+                            🚨 @(CurrentLang == "en-US" ? "Exam" : "Kolokwium")
+                        </button>
+                        <button class="btn btn-primary" style="flex: 1; font-weight: 600;" @onclick="OpenNotesForLesson">
+                            📖 @(CurrentLang == "en-US" ? "Notes" : "Notatki")
+                        </button>
+                    </div>
+                }
+
+                @if (AppState.HasManagementPrivileges || SelectedLesson.Type == "WŁASNE")
+                {
+                    bool isPastLesson = SelectedLesson.End < DateTime.Now;
+                    <div style="background: rgba(249, 115, 22, 0.08); border: 1px solid rgba(249, 115, 22, 0.2); padding: 14px; border-radius: 12px; margin-top: 8px;">
+                        <p style="color: var(--color-starosta); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; margin: 0 0 10px 0; text-transform: uppercase;">
+                            @if (SelectedLesson.Type == "WŁASNE")
+                            {
+                                <span>👤 @(CurrentLang == "en-US" ? "Personal Event" : "Twoje wydarzenie osobiste")</span>
+                            }
+                            else if (AppState.IsStarosta)
+                            {
+                                <span>👑 @(CurrentLang == "en-US" ? "Starosta Controls" : "Zarządzanie Starosty")</span>
+                            }
+                            else
+                            {
+                                <span>🛡️ @(CurrentLang == "en-US" ? "Admin Controls" : "Zarządzanie Admina")</span>
+                            }
+                        </p>
+                        @if (isPastLesson)
+                        {
+                            <div style="background: rgba(255, 255, 255, 0.05); border: 1px dashed var(--border-color); border-radius: 8px; padding: 12px; text-align: center; color: var(--text-muted); font-size: 0.84rem; line-height: 1.4;">
+                                ⏳ @(CurrentLang == "en-US" ? "This class has already taken place. Modifications are locked." : "Te zajęcia już się odbyły. Modyfikacja w chmurze została zablokowana.")
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="modal-actions-row" style="flex-direction: column; gap: 8px;">
+                                @if (SelectedLesson.Type == "STAR" || SelectedLesson.Type == "WŁASNE")
+                                {
+                                    <button class="btn btn-danger" style="width: 100%; font-weight: 600;" @onclick="ActionDelete" disabled="@isModalActionInProgress">
+                                        🗑️ @(CurrentLang == "en-US" ? "Delete event" : "Usuń to wydarzenie")
+                                    </button>
+                                }
+                                else
+                                {
+                                    @if (SelectedLesson.IsCanceled)
+                                    {
+                                        <button class="btn" style="width: 100%; background-color: var(--color-wyklad); color: white; font-weight: 600;" @onclick="ActionCancel" disabled="@isModalActionInProgress">
+                                            ↩️ @(CurrentLang == "en-US" ? "Restore class" : "Cofnij odwołanie")
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <div style="display: flex; gap: 8px; width: 100%;">
+                                            <button class="btn btn-danger" style="flex: 1; font-weight: 600;" @onclick="ActionCancel" disabled="@isModalActionInProgress">
+                                                @(CurrentLang == "en-US" ? "Cancel class" : "Odwołaj zajęcia")
+                                            </button>
+                                            <button class="btn" style="flex: 1; background-color: var(--color-starosta); color: white; font-weight: 600;" @onclick="OpenMoveModal" disabled="@isModalActionInProgress">
+                                                @(CurrentLang == "en-US" ? "Reschedule" : "Przesuń termin")
+                                            </button>
+                                        </div>
+                                        <button class="btn" style="width: 100%; background-color: var(--primary-color); font-weight: 600; color: white;" @onclick="OpenRoomModal" disabled="@isModalActionInProgress">
+                                            @(CurrentLang == "en-US" ? "Change room" : "Zmień salę")
+                                        </button>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (IsAddEventModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <h2 class="modal-title" style="color: var(--primary-color);">
+                📅 @(CurrentLang == "en-US" ? "New Event" : "Nowe Wydarzenie")
+            </h2>
+            
+            <div class="form-group">
+                <label>@(CurrentLang == "en-US" ? "Title" : "Tytuł")</label>
+                <input type="text" class="form-control" placeholder='@(CurrentLang == "en-US" ? "e.g. Club meeting" : "np. Spotkanie koła")' @bind="newEvTitle">
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px;">
+                <div>
+                    <label style="font-weight: 600; font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 4px;">@(CurrentLang == "en-US" ? "Start (Date & Time):" : "Początek (Data i godzina):")</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="date" class="form-control" style="flex: 1.2; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 9px 10px; border-radius: 10px; color-scheme: dark;" @bind="newEvStartDate" @bind:format="yyyy-MM-dd" min="2024-01-01" max="2035-12-31" />
+                        <div style="display: flex; gap: 4px; align-items: center; flex: 1; min-width: 0;">
+                            <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 9px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@newEvStartHour" @onchange="OnNewEvStartHourChanged">
+                                @for (int h = 0; h < 24; h++)
+                                {
+                                    <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                                }
+                            </select>
+                            <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                            <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 9px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@newEvStartMinute" @onchange="OnNewEvStartMinuteChanged">
+                                @for (int m = 0; m <= 59; m++)
+                                {
+                                    <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label style="font-weight: 600; font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 4px;">@(CurrentLang == "en-US" ? "End (Date & Time):" : "Koniec (Data i godzina):")</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <input type="date" class="form-control" style="flex: 1.2; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 9px 10px; border-radius: 10px; color-scheme: dark;" @bind="newEvEndDate" @bind:format="yyyy-MM-dd" min="2024-01-01" max="2035-12-31" />
+                        <div style="display: flex; gap: 4px; align-items: center; flex: 1; min-width: 0;">
+                            <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 9px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@newEvEndHour" @onchange="OnNewEvEndHourChanged">
+                                @for (int h = 0; h < 24; h++)
+                                {
+                                    <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                                }
+                            </select>
+                            <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                            <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 9px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@newEvEndMinute" @onchange="OnNewEvEndMinuteChanged">
+                                @for (int m = 0; m <= 59; m++)
+                                {
+                                    <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>@(CurrentLang == "en-US" ? "Place / Room" : "Miejsce / Sala")</label>
+                <input type="text" class="form-control" placeholder='@(CurrentLang == "en-US" ? "e.g. MS Teams" : "np. MS TEAMS")' @bind="newEvPlace">
+            </div>
+            <div class="form-group">
+                <label>@(CurrentLang == "en-US" ? "Description (optional)" : "Opis (opcjonalnie)")</label>
+                <textarea class="form-control" rows="2" placeholder='@(CurrentLang == "en-US" ? "Additional info..." : "Dodatkowe informacje...")' @bind="newEvDesc"></textarea>
+            </div>
+
+            <div style="margin-top: 15px; display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" style="accent-color: var(--danger-color); width: 18px; height: 18px;" @bind="newEvImportant">
+                    <label style="color: var(--danger-color); font-weight: bold; margin: 0;">
+                        🚨 @(CurrentLang == "en-US" ? "Mark as high priority" : "Oznacz jako bardzo ważne")
+                    </label>
+                </div>
+                
+                @if (AppState.HasManagementPrivileges)
+                {
+                    <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-color); border-radius: 10px; padding: 12px;">
+                        <label style="display: block; font-weight: 600; font-size: 0.88rem; margin-bottom: 8px;">
+                            @(CurrentLang == "en-US" ? "Audience / Visibility:" : "Zasięg wydarzenia:")
+                        </label>
+                        <div style="display: flex; gap: 8px;">
+                            <button type="button" class="btn @(!newEvGlobal ? "btn-primary" : "btn-secondary")" style="flex: 1; font-size: 0.83rem; font-weight: 600; padding: 8px 10px; border-radius: 8px;" @onclick="() => newEvGlobal = false">
+                                👤 @(CurrentLang == "en-US" ? "Personal (Only Me)" : "Prywatne (Tylko ja)")
+                            </button>
+                            <button type="button" class="btn" style="flex: 1; font-size: 0.83rem; font-weight: 600; padding: 8px 10px; border-radius: 8px; @(newEvGlobal ? "background-color: var(--color-starosta); color: white;" : "background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main);")" @onclick="() => newEvGlobal = true">
+                                👥 @(AppState.IsStarosta ? (CurrentLang == "en-US" ? "Starosta (Cohort)" : "Starosta (Dla grupy)") : (CurrentLang == "en-US" ? "Admin (Cohort)" : "Admin (Dla grupy)"))
+                            </button>
+                        </div>
+                        <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 8px; line-height: 1.4;">
+                            @(newEvGlobal 
+                                ? (CurrentLang == "en-US" ? "🌐 Published to the cloud and visible to all students in your group." : "🌐 Opublikowane w chmurze i widoczne dla wszystkich studentów w Twojej grupie.") 
+                                : (CurrentLang == "en-US" ? "🔒 Saved locally and synced securely across your own devices." : "🔒 Zapisane prywatnie i synchronizowane między Twoimi urządzeniami."))
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div style="background: rgba(10, 132, 255, 0.08); border-left: 3px solid var(--primary-color); padding: 10px 12px; border-radius: 8px; font-size: 0.83rem; color: var(--text-secondary); line-height: 1.4;">
+                        👤 <strong>@(CurrentLang == "en-US" ? "Personal Event:" : "Wydarzenie osobiste:")</strong> @(CurrentLang == "en-US" ? "This event is saved locally and synced across your devices." : "To wydarzenie jest zapisane w Twoim kalendarzu i synchronizowane między Twoimi urządzeniami.")
+                    </div>
+                }
+            </div>
+            
+            <div class="modal-actions-row" style="margin-top: 20px;">
+                <button class="btn" style="width: 100%; font-weight: 600; background-color: var(--primary-color); color: white;" @onclick="ActionSaveEvent" disabled="@isModalActionInProgress">
+                    @if (isModalActionInProgress)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Saving..." : "Zapisywanie...")</span>
+                    }
+                    else
+                    {
+                        <span>@(CurrentLang == "en-US" ? "Save event" : "Zapisz wydarzenie")</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (IsTaskExamModalOpen)
+{
+    var isExam = TaskType == "Kolokwium";
+    var mainColor = !isExam ? "var(--warning-color)" : "var(--danger-color)";
+    var mainIcon = !isExam ? "📝" : "🚨";
+    var displayType = isExam 
+        ? (CurrentLang == "en-US" ? "Exam" : "Kolokwium") 
+        : (CurrentLang == "en-US" ? "Task" : "Zadanie");
+
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <h2 class="modal-title" style="color: @mainColor;">@mainIcon @(CurrentLang == "en-US" ? $"Add {displayType}" : $"Dodaj {displayType}")</h2>
+            
+            <div class="modal-info-box">
+                <div class="modal-info-row">
+                    <span class="modal-info-label">@(CurrentLang == "en-US" ? "For:" : "Dla:")</span>
+                    <span><strong>@SelectedLesson?.Title</strong></span>
+                </div>
+                <div class="modal-info-row">
+                    <span class="modal-info-label">@(CurrentLang == "en-US" ? "Date:" : "Termin:")</span>
+                    <span>@SelectedLesson?.Start.ToString("dd.MM.yyyy HH:mm")</span>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label style="color: var(--text-main); font-weight: 600;">
+                    @(CurrentLang == "en-US" ? "Topic / Scope" : "Temat / Zakres materiału")
+                </label>
+                <input type="text" class="form-control" placeholder='@(CurrentLang == "en-US" ? "Enter short topic..." : "Wpisz krótki temat...")' @bind="taskTitle">
+            </div>
+            <div class="form-group">
+                <label style="color: var(--text-main); font-weight: 600;">
+                    @(CurrentLang == "en-US" ? "Details (description, links)" : "Szczegóły (opis, linki)")
+                </label>
+                <textarea class="form-control" rows="3" placeholder='@(CurrentLang == "en-US" ? "Additional information..." : "Dodatkowe informacje...")' @bind="taskDesc"></textarea>
+            </div>
+
+            @if (AppState.HasManagementPrivileges)
+            {
+                <div style="background: rgba(249, 115, 22, 0.08); border-left: 3px solid var(--color-starosta); padding: 12px 14px; border-radius: 8px; display: flex; gap: 10px; align-items: center; margin-bottom: 14px;">
+                    <input type="checkbox" style="accent-color: var(--color-starosta); width: 18px; height: 18px; cursor: pointer;" @bind="taskGlobal">
+                    <div style="display: flex; flex-direction: column;">
+                        <span style="font-weight: 600; font-size: 0.95rem; color: var(--color-starosta);">
+                            @(AppState.IsStarosta ? (CurrentLang == "en-US" ? "Publish as Starosta" : "Dodaj jako Starosta") : (CurrentLang == "en-US" ? "Publish as Admin" : "Dodaj jako Admin"))
+                        </span>
+                        <span style="color: var(--text-muted); font-size: 0.82rem;">
+                            @(CurrentLang == "en-US" ? "Visible to all students in year" : "Widoczne dla wszystkich na roku")
+                        </span>
+                    </div>
+                </div>
+            }
+            
+            <div class="modal-actions-row" style="margin-top: 16px;">
+                <button class="btn" style="width: 100%; font-weight: 600; background-color: var(--primary-color); color: white;" @onclick="ActionSaveTask" disabled="@isModalActionInProgress">
+                    @if (isModalActionInProgress)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Saving..." : "Zapisywanie...")</span>
+                    }
+                    else
+                    {
+                        <span>@(CurrentLang == "en-US" ? $"Add {displayType}" : $"Dodaj {displayType.ToLower()}")</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (IsMoveModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <h2 class="modal-title" style="color: var(--primary-color);">
+                🕒 @(CurrentLang == "en-US" ? "Reschedule class" : "Przesuń termin")
+            </h2>
+            <div class="form-group" style="margin-bottom: 12px;">
+                <label style="font-weight: 600; font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 4px;">@(CurrentLang == "en-US" ? "New date:" : "Nowa data:")</label>
+                <input type="date" class="form-control" style="background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px; border-radius: 10px; width: 100%; color-scheme: dark;" @bind="moveDate" @bind:format="yyyy-MM-dd" min="2024-01-01" max="2035-12-31" />
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label style="font-weight: 600; font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 4px;">@(CurrentLang == "en-US" ? "Start time:" : "Godzina startu:")</label>
+                    <div style="display: flex; gap: 4px; align-items: center;">
+                        <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@moveStartTime.Hour" @onchange="OnMoveStartHourChanged">
+                            @for (int h = 0; h <= 23; h++)
+                            {
+                                <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                            }
+                        </select>
+                        <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                        <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@moveStartTime.Minute" @onchange="OnMoveStartMinuteChanged">
+                            @for (int m = 0; m <= 59; m++)
+                            {
+                                <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label style="font-weight: 600; font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 4px;">@(CurrentLang == "en-US" ? "End time:" : "Godzina końca:")</label>
+                    <div style="display: flex; gap: 4px; align-items: center;">
+                        <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@moveEndTime.Hour" @onchange="OnMoveEndHourChanged">
+                            @for (int h = 0; h <= 23; h++)
+                            {
+                                <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                            }
+                        </select>
+                        <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                        <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@moveEndTime.Minute" @onchange="OnMoveEndMinuteChanged">
+                            @for (int m = 0; m <= 59; m++)
+                            {
+                                <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-actions-row" style="margin-top: 20px;">
+                <button class="btn" style="background-color: var(--primary-color); color: white; font-weight: 600; width: 100%;" @onclick="ActionMove" disabled="@isModalActionInProgress">
+                    @if (isModalActionInProgress)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Updating..." : "Zapisywanie...")</span>
+                    }
+                    else
+                    {
+                        <span>@(CurrentLang == "en-US" ? "Update timetable" : "Zaktualizuj termin")</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (IsRoomModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <h2 class="modal-title" style="color: var(--primary-color);">
+                📍 @(CurrentLang == "en-US" ? "Change classroom" : "Zmień salę")
+            </h2>
+            <div class="form-group">
+                <label>@(CurrentLang == "en-US" ? "New room / MS Teams link:" : "Nowa sala (lub link do MS Teams):")</label>
+                <input type="text" class="form-control" placeholder='@(CurrentLang == "en-US" ? "e.g. Room 404 (MS)" : "np. Sala 404 (MS)")' @bind="newRoom">
+            </div>
+
+            @if (AppState.HasManagementPrivileges)
+            {
+                <div class="form-group" style="margin-top: 10px;">
+                    <label style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">@(CurrentLang == "en-US" ? "Scope of room change:" : "Zasięg zmiany sali:")</label>
+                    <select class="form-control" @bind="roomModalScope" style="background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 10px; border-radius: 8px; width: 100%; font-weight: 600;">
+                        <option value="one">@(CurrentLang == "en-US" ? "📍 Single Class (only this date)" : "📍 Jednorazowo (tylko ten termin)")</option>
+                        <option value="all">@(CurrentLang == "en-US" ? "🔄 Entire Semester (all future classes)" : "🔄 Do końca semestru (wszystkie przyszłe zajęcia)")</option>
+                    </select>
+                </div>
+            }
+            
+            <div class="modal-actions-row" style="margin-top: 20px;">
+                <button class="btn" style="background-color: var(--primary-color); color: white; font-weight: 600; width: 100%;" @onclick="ActionRoom" disabled="@isModalActionInProgress">
+                    @if (isModalActionInProgress)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Saving..." : "Zapisywanie...")</span>
+                    }
+                    else
+                    {
+                        <span>@(CurrentLang == "en-US" ? "Save room change" : "Zapisz zmianę sali")</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (IsExportModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <h2 class="modal-title" style="color: var(--primary-color); display: flex; align-items: center; gap: 8px;">
+                <span>📅</span> @(CurrentLang == "en-US" ? "Export to Calendar" : "Eksport do Kalendarza")
+            </h2>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: -4px; margin-bottom: 18px;">
+                @(CurrentLang == "en-US" ? "Import your timetable into your device calendar or share an .ics file." : "Dodaj plan zajęć do kalendarza w swoim telefonie lub udostępnij plik .ics.")
+            </p>
+
+            <div style="background: var(--input-bg); border-radius: 12px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--border-color);">
+                <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em;">
+                    @(CurrentLang == "en-US" ? "Export Scope:" : "Zakres zajęć:")
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-main); font-weight: 500;">
+                        <input type="radio" name="exportScope" value="week" checked="@(exportScope == "week")" @onchange='() => exportScope = "week"' style="accent-color: var(--primary-color);" />
+                        <span>@(CurrentLang == "en-US" ? "Current week only" : "Tylko bieżący tydzień") (@CurrentWeekStart.ToString("dd.MM") – @CurrentWeekStart.AddDays(DaysToDisplay-1).ToString("dd.MM"))</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-main); font-weight: 500;">
+                        <input type="radio" name="exportScope" value="all" checked="@(exportScope == "all")" @onchange='() => exportScope = "all"' style="accent-color: var(--primary-color);" />
+                        <span>@(CurrentLang == "en-US" ? "All loaded classes (full timetable)" : "Wszystkie pobrane zajęcia (cały plan)")</span>
+                    </label>
+                </div>
+            </div>
+
+            <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: var(--input-bg); border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--border-color);">
+                <div>
+                    <div style="font-weight: 600; color: var(--text-main); font-size: 0.92rem;">
+                        @(CurrentLang == "en-US" ? "Reminders before classes" : "Przypomnienia przed zajęciami")
+                    </div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted);">
+                        @(CurrentLang == "en-US" ? "Alarm 15 minutes before class starts" : "Powiadomienie na 15 minut przed rozpoczęciem")
+                    </div>
+                </div>
+                <input type="checkbox" @bind="exportWithAlarms" style="width: 20px; height: 20px; accent-color: var(--primary-color); cursor: pointer;" />
+            </div>
+
+            <div class="modal-actions-row" style="flex-direction: column; gap: 10px;">
+                <button class="btn btn-primary" style="width: 100%; padding: 13px; font-weight: 600; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px;" @onclick="ExecuteCalendarExport">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 18px; height: 18px;"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    <span>@(CurrentLang == "en-US" ? "Open in Calendar" : "Otwórz w Kalendarzu")</span>
+                </button>
+                <button class="btn btn-secondary" style="width: 100%; padding: 11px; font-weight: 600; border-radius: 12px; background: transparent; border: 1px solid var(--border-color); color: var(--text-main);" @onclick="ExecuteShareIcs">
+                    @(CurrentLang == "en-US" ? "Share .ics file (AirDrop / Files)" : "Udostępnij plik .ics (AirDrop / Pliki)")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // ŁĄCZNIK Z SYSTEMEM TOASTÓW Z MAINLAYOUT
+    [CascadingParameter] public MainLayout? Layout { get; set; }
+
+    private bool isLoading = true; // Flaga ekranu ładowania
+    private bool isGodModeLoading = false; // Flaga ładowania trybu God Mode
+    private bool IsGodMode = false;
+    private string CurrentLang = "pl-PL";
+
+    private DateTime CurrentWeekStart;
+    private System.Timers.Timer? _timer;
+    
+    private bool IsEvenWeek => AppState.IsWeekEven(CurrentWeekStart);
+    
+    private bool ShowModified = true; 
+    private string CurrentView = "List"; 
+
+    private const int CalendarHeaderHeight = 38;
+
+    private bool isFitToScreen = true;
+    private int customFitHourHeight = 0;
+
+    private int CalendarHourHeight
+    {
+        get
+        {
+            if (customFitHourHeight > 0) return customFitHourHeight;
+            if (isFitToScreen)
+            {
+                int totalHours = Math.Max(1, EndHour - StartHour);
+                if (totalHours <= 9) return 48;
+                if (totalHours <= 10) return 44;
+                if (totalHours <= 11) return 40;
+                if (totalHours <= 12) return 37;
+                return 34;
+            }
+            return 56;
+        }
+    }
+
+    private void ToggleFitToScreen()
+    {
+        HapticHelper.TriggerClick();
+        isFitToScreen = !isFitToScreen;
+        customFitHourHeight = 0;
+        StateHasChanged();
+    }
+
+    private async Task ToggleGodModeQuick()
+    {
+        HapticHelper.TriggerSelection();
+        IsGodMode = !IsGodMode;
+        await OnGodModeToggled();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (CurrentView == "Calendar" && isFitToScreen)
+        {
+            try
+            {
+                int h = await JS.InvokeAsync<int>("getCalendarFitHourHeight", Math.Max(1, EndHour - StartHour));
+                if (h > 0 && h != customFitHourHeight)
+                {
+                    customFitHourHeight = h;
+                    StateHasChanged();
+                }
+            }
+            catch
+            {
+                // Ignoruj błędy interop w środowisku testowym lub przed podpięciem WebView
+            }
+        }
+    }
+
+    private List<Lesson> LessonsInWeek = new();
+    private int StartHour = 8;
+    private int EndHour = 18;
+    private int DaysToDisplay = 5;
+    private int? SelectedMobileDayIndex = null;
+    private bool IsExportModalOpen = false;
+    private string exportScope = "all";
+    private bool exportWithAlarms = true;
+
+    private int? GetTodayIndex()
+    {
+        var today = DateTime.Today;
+        if (today >= CurrentWeekStart && today < CurrentWeekStart.AddDays(DaysToDisplay))
+        {
+            int diff = (int)today.DayOfWeek - (int)DayOfWeek.Monday;
+            if (diff < 0) diff = 6; // Niedziela
+            if (diff < DaysToDisplay) return diff;
+        }
+        return null;
+    }
+
+    private void SwitchToList()
+    {
+        CurrentView = "List";
+    }
+
+    private void SwitchToGrid()
+    {
+        CurrentView = "Grid";
+    }
+
+    private void SwitchToCalendar()
+    {
+        HapticHelper.TriggerClick();
+        CurrentView = "Calendar";
+        customFitHourHeight = 0;
+    }
+
+    private void SelectMobileDay(int index)
+    {
+        HapticHelper.TriggerSelection();
+        // W widoku listy ponowne kliknięcie przełącza na cały tydzień
+        SelectedMobileDayIndex = (SelectedMobileDayIndex == index) ? null : index;
+    }
+
+    private void SelectAllDays()
+    {
+        HapticHelper.TriggerSelection();
+        SelectedMobileDayIndex = null;
+    }
+
+    private void ToggleQuickParity()
+    {
+        AppState.CycleWeekParity();
+        string modeName = AppState.WeekParity switch
+        {
+            WeekParityMode.Auto => (CurrentLang == "en-US" ? "Auto (USOS / Calendar)" : "Auto (USOS / Kalendarz)"),
+            WeekParityMode.AlwaysEven => (CurrentLang == "en-US" ? "Always Even" : "Zawsze parzysty"),
+            WeekParityMode.AlwaysOdd => (CurrentLang == "en-US" ? "Always Odd" : "Zawsze nieparzysty"),
+            WeekParityMode.Inverted => (CurrentLang == "en-US" ? "Inverted Parity" : "Odwrócona parzystość"),
+            _ => ""
+        };
+        Layout?.ShowToast(CurrentLang == "en-US" ? $"Week parity: {modeName}" : $"Parzystość tygodnia: {modeName}", MainLayout.ToastType.Info);
+    }
+
+    private bool IsLessonModalOpen = false;
+    private Lesson? SelectedLesson;
+    
+    private bool IsAddEventModalOpen = false;
+    private string newEvTitle = ""; private string newEvDesc = ""; 
+    private DateOnly newEvStartDate = DateOnly.FromDateTime(DateTime.Today);
+    private DateOnly newEvEndDate = DateOnly.FromDateTime(DateTime.Today);
+    private int newEvStartHour = 10;
+    private int newEvStartMinute = 0;
+    private int newEvEndHour = 11;
+    private int newEvEndMinute = 30;
+    private string newEvPlace = ""; private bool newEvGlobal = false; private bool newEvImportant = false;
+
+    private void OnNewEvStartHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h)) newEvStartHour = h;
+    }
+    private void OnNewEvStartMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m)) newEvStartMinute = m;
+    }
+    private void OnNewEvEndHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h)) newEvEndHour = h;
+    }
+    private void OnNewEvEndMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m)) newEvEndMinute = m;
+    }
+
+    private void OnMoveStartHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+            moveStartTime = new TimeOnly(h, moveStartTime.Minute);
+    }
+    private void OnMoveStartMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+            moveStartTime = new TimeOnly(moveStartTime.Hour, m);
+    }
+    private void OnMoveEndHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+            moveEndTime = new TimeOnly(h, moveEndTime.Minute);
+    }
+    private void OnMoveEndMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+            moveEndTime = new TimeOnly(moveEndTime.Hour, m);
+    }
+
+    private bool IsTaskExamModalOpen = false;
+    private string TaskType = "";
+    private string taskTitle = ""; private string taskDesc = ""; private bool taskGlobal = false;
+    private bool IsMoveModalOpen = false;
+    private DateOnly moveDate = DateOnly.FromDateTime(DateTime.Today);
+    private TimeOnly moveStartTime = new(10, 0);
+    private TimeOnly moveEndTime = new(11, 30);
+    
+    private bool IsRoomModalOpen = false;
+    private string newRoom = "";
+    private string roomModalScope = "one"; // "one" | "all"
+    private bool isModalActionInProgress = false;
+
+    private bool isOffline = false;
+    private string? scheduleErrorMessage = null;
+    private bool hasAuthError = false;
+
+    private bool IsCurrentWeek
+    {
+        get
+        {
+            var today = DateTime.Today;
+            int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+            var thisMonday = today.AddDays(-diff);
+            return CurrentWeekStart.Date == thisMonday.Date;
+        }
+    }
+
+    private async Task JumpToToday()
+    {
+        HapticHelper.TriggerClick();
+        var today = DateTime.Today;
+        int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+        CurrentWeekStart = today.AddDays(-diff);
+        SelectedMobileDayIndex = GetTodayIndex();
+        await LoadWeekDataAsync();
+    }
+
+    private async Task ForceRefreshScheduleAsync()
+    {
+        if (isLoading) return;
+        HapticHelper.TriggerClick();
+        scheduleErrorMessage = null;
+        hasAuthError = false;
+        await LoadWeekDataAsync(force: true);
+        if (string.IsNullOrEmpty(scheduleErrorMessage))
+        {
+            HapticHelper.TriggerSuccess();
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Timetable updated from USOS." : "Plan zajęć zaktualizowany z USOS.", MainLayout.ToastType.Success);
+        }
+    }
+
+    private void NavigateToLogin()
+    {
+        UsosAuthService.NotifySessionExpired();
+        Navigation.NavigateTo("/login", true);
+    }
+
+    private void OnConnectivityChanged(object? sender, ConnectivityChangedEventArgs e)
+    {
+        var wasOffline = isOffline;
+        isOffline = e.NetworkAccess != NetworkAccess.Internet;
+        if (wasOffline != isOffline)
+        {
+            if (isOffline)
+            {
+                HapticHelper.TriggerWarning();
+            }
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentLang = AppState.Language;
+        var today = DateTime.Today;
+        int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+        CurrentWeekStart = today.AddDays(-diff);
+        CurrentView = "List";
+        SelectedMobileDayIndex = GetTodayIndex(); // Na liście domyślnie zaznaczony dzisiejszy dzień
+
+        AppState.OnChange += OnAppStateChanged;
+        ScheduleService.OnScheduleLoaded += OnScheduleDataChanged;
+
+        try
+        {
+            isOffline = Connectivity.Current.NetworkAccess != NetworkAccess.Internet;
+            Connectivity.Current.ConnectivityChanged += OnConnectivityChanged;
+        }
+        catch
+        {
+            // Ignoruj na platformach bez monitoringu sieci
+        }
+
+        _timer = new System.Timers.Timer(60000);
+        _timer.Elapsed += (s, e) => InvokeAsync(StateHasChanged);
+        _timer.Start();
+
+        await LoadWeekDataAsync();
+    }
+
+    private void OnScheduleDataChanged()
+    {
+        InvokeAsync(() =>
+        {
+            RecalculateWeekMetrics();
+            StateHasChanged();
+        });
+    }
+
+    private void OnAppStateChanged()
+    {
+        CurrentLang = AppState.Language;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnGodModeToggled()
+    {
+        if (!IsGodMode)
+        {
+            isGodModeLoading = false;
+            isLoading = false;
+            RecalculateWeekMetrics();
+            StateHasChanged();
+            return;
+        }
+
+        isGodModeLoading = true;
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            await LoadWeekDataAsync(force: true);
+        }
+        finally
+        {
+            isGodModeLoading = false;
+            isLoading = false;
+            RecalculateWeekMetrics();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadWeekDataAsync(bool force = false)
+    {
+        scheduleErrorMessage = null;
+        hasAuthError = false;
+        try
+        {
+            var weekEnd = CurrentWeekStart.AddDays(7);
+            var prepared = ScheduleService.GetPreparedData(IsGodMode);
+            bool hasAnyLessons = prepared.Any();
+            bool hasWeekLessons = prepared.Any(l => l.Start >= CurrentWeekStart && l.Start < weekEnd);
+
+            bool isFresh = IsGodMode 
+                ? ScheduleService.IsGodModeFresh(CurrentWeekStart, DaysToDisplay)
+                : ScheduleService.IsCacheFresh;
+
+            // Jeśli mamy dane na ten tydzień w pamięci i są świeże oraz nie wymuszono:
+            if (hasWeekLessons && isFresh && !force)
+            {
+                isLoading = false;
+                RecalculateWeekMetrics();
+                StateHasChanged();
+                return;
+            }
+
+            // Jeśli nie ma danych dla tego tygodnia w pamięci/cache:
+            if (!hasWeekLessons)
+            {
+                isLoading = true;
+                StateHasChanged();
+
+                // Jeśli pamięć podręczna jest całkowicie pusta (np. po wyczyszczeniu danych) lub wymuszono:
+                // Pobieramy 35 dni (5 tygodni), aby zapełnić cały miesiąc!
+                int daysToFetch = (!hasAnyLessons || force) ? 35 : 14;
+                var fetchStart = (!hasAnyLessons || force) ? CurrentWeekStart.AddDays(-7) : CurrentWeekStart;
+
+                await ScheduleService.EnsureDataLoadedAsync(UsosApiService, fetchStart, daysToFetch, force: force, godMode: IsGodMode);
+                RecalculateWeekMetrics();
+            }
+            else
+            {
+                // Mamy dane w pamięci podręcznej, ale minął czas ważności lub wymuszono:
+                // Natychmiast pokazujemy lokalne dane, a w tle odświeżamy
+                isLoading = false;
+                RecalculateWeekMetrics();
+                StateHasChanged();
+
+                int daysToFetch = force ? 35 : 7;
+                var fetchStart = force ? CurrentWeekStart.AddDays(-7) : CurrentWeekStart;
+
+                await ScheduleService.EnsureDataLoadedAsync(UsosApiService, fetchStart, daysToFetch, force: force, godMode: IsGodMode);
+                RecalculateWeekMetrics();
+            }
+        }
+        catch (UnauthorizedAccessException authEx)
+        {
+            hasAuthError = true;
+            scheduleErrorMessage = ScheduleLogic.FormatUsosErrorMessage(authEx.Message, CurrentLang);
+            Console.WriteLine("[Schedule] Błąd autoryzacji USOS: " + authEx);
+            Layout?.ShowToast(scheduleErrorMessage, MainLayout.ToastType.Error);
+            UsosAuthService.NotifySessionExpired();
+        }
+        catch (Exception ex)
+        {
+            scheduleErrorMessage = ScheduleLogic.FormatUsosErrorMessage(ex.Message, CurrentLang);
+            Console.WriteLine("[Schedule] Błąd pobierania planu: " + ex);
+            Layout?.ShowToast(scheduleErrorMessage, MainLayout.ToastType.Warning);
+        }
+        finally
+        {
+            isLoading = false;
+            RecalculateWeekMetrics();
+            StateHasChanged();
+        }
+    }
+
+    private async Task NextWeek() 
+    { 
+        HapticHelper.TriggerClick();
+        CurrentWeekStart = CurrentWeekStart.AddDays(7); 
+        await LoadWeekDataAsync(); 
+    }
+    
+    private async Task PrevWeek() 
+    { 
+        HapticHelper.TriggerClick();
+        CurrentWeekStart = CurrentWeekStart.AddDays(-7); 
+        await LoadWeekDataAsync(); 
+    }
+
+    private void ToggleModified() 
+    { 
+        ShowModified = !ShowModified;
+        RecalculateWeekMetrics();
+        StateHasChanged();
+    }
+
+    private void RecalculateWeekMetrics()
+    {
+        var allData = ScheduleService.GetPreparedData(IsGodMode).Concat(ScheduleService.CustomEvents).ToList();
+        LessonsInWeek = allData.Where(l => 
+        {
+            var effStart = ShowModified ? l.Start : (l.OriginalStart != default ? l.OriginalStart : l.Start);
+            var effEnd = ShowModified ? l.End : (l.OriginalEnd != default ? l.OriginalEnd : l.End);
+            return effEnd >= CurrentWeekStart && effStart < CurrentWeekStart.AddDays(7) && (!(!ShowModified && l.IsPersonal));
+        }).ToList();
+
+        bool hasWeekend = LessonsInWeek.Any(l => {
+            var d = ShowModified ? l.Start.DayOfWeek : (l.OriginalStart != default ? l.OriginalStart.DayOfWeek : l.Start.DayOfWeek);
+            return d == DayOfWeek.Saturday || d == DayOfWeek.Sunday;
+        });
+
+        bool todayIsWeekend = (DateTime.Today >= CurrentWeekStart && DateTime.Today < CurrentWeekStart.AddDays(7)) &&
+                              (DateTime.Today.DayOfWeek == DayOfWeek.Saturday || DateTime.Today.DayOfWeek == DayOfWeek.Sunday);
+
+        DaysToDisplay = (hasWeekend || todayIsWeekend) ? 7 : 5;
+
+        if (LessonsInWeek.Any())
+        {
+            var minH = LessonsInWeek.Min(l => ShowModified ? l.Start.Hour : (l.OriginalStart != default ? l.OriginalStart.Hour : l.Start.Hour));
+            
+            var maxH = LessonsInWeek.Max(l => {
+                var s = ShowModified ? l.Start : (l.OriginalStart != default ? l.OriginalStart : l.Start);
+                var e = ShowModified ? l.End : (l.OriginalEnd != default ? l.OriginalEnd : l.End);
+                if (e.Date > s.Date || e.Hour == 0 || e.Hour < s.Hour) return 18;
+                int endH = e.Minute > 0 ? e.Hour + 1 : e.Hour;
+                return Math.Max(s.Hour, endH);
+            });
+            
+            StartHour = Math.Max(0, Math.Min(8, minH));
+            EndHour = Math.Min(23, Math.Max(18, maxH));
+        }
+        else 
+        {
+            StartHour = 8;
+            EndHour = 18; 
+        }
+    }
+
+    private IEnumerable<Lesson> GetLessonsForDay(DateTime date)
+    {
+        var allData = ScheduleService.GetPreparedData(IsGodMode).Concat(ScheduleService.CustomEvents);
+        if (!ShowModified)
+        {
+            return allData.Where(l => !l.IsPersonal && 
+                ((l.OriginalStart != default ? l.OriginalStart.Date : l.Start.Date) <= date.Date && 
+                 (l.OriginalEnd != default ? l.OriginalEnd.Date : l.End.Date) >= date.Date))
+                .OrderBy(l => l.OriginalStart != default ? l.OriginalStart : l.Start);
+        }
+        return allData.Where(l => l.Start.Date <= date.Date && l.End.Date >= date.Date).OrderBy(l => l.Start);
+    }
+
+    private List<ScheduleLogic.CalendarEventSlice> GetCalendarEvents(DateTime date)
+    {
+        var lessons = GetLessonsForDay(date);
+        var slices = lessons
+            .Select(l => ScheduleLogic.SliceLessonForDay(l, date, StartHour, EndHour, ShowModified))
+            .Where(s => s != null)
+            .Select(s => s!)
+            .ToList();
+
+        return ScheduleLogic.CalculateEventLayout(slices);
+    }
+
+    private string GetBorderColor(Lesson l)
+    {
+        if (l.IsHighPriority) return "var(--danger-color)";
+        var type = l.Type.ToUpper();
+        if (type == "WYK") return "var(--color-wyklad, #10b981)"; 
+        if (type == "CW") return "var(--color-cwiczenia, #f59e0b)";
+        if (type == "LAB") return "var(--color-lab, #3b82f6)"; 
+        if (type == "LEKT") return "var(--color-lekt, #ec4899)";
+        if (type == "STAR") return "var(--color-starosta, #f97316)"; 
+        if (type == "WŁASNE") return "var(--primary-color)";
+        return "var(--border-color, #334155)"; 
+    }
+
+    private string GetDayName(DayOfWeek day) => CurrentLang == "en-US" ? day switch 
+    { 
+        DayOfWeek.Monday => "Monday", 
+        DayOfWeek.Tuesday => "Tuesday", 
+        DayOfWeek.Wednesday => "Wednesday", 
+        DayOfWeek.Thursday => "Thursday", 
+        DayOfWeek.Friday => "Friday", 
+        DayOfWeek.Saturday => "Saturday", 
+        DayOfWeek.Sunday => "Sunday", 
+        _ => "" 
+    } : day switch 
+    { 
+        DayOfWeek.Monday => "Poniedziałek", 
+        DayOfWeek.Tuesday => "Wtorek", 
+        DayOfWeek.Wednesday => "Środa", 
+        DayOfWeek.Thursday => "Czwartek", 
+        DayOfWeek.Friday => "Piątek", 
+        DayOfWeek.Saturday => "Sobota", 
+        DayOfWeek.Sunday => "Niedziela", 
+        _ => "" 
+    };
+
+    private string GetDayNameShort(DayOfWeek day) => CurrentLang == "en-US" ? day switch 
+    { 
+        DayOfWeek.Monday => "Mon", 
+        DayOfWeek.Tuesday => "Tue", 
+        DayOfWeek.Wednesday => "Wed", 
+        DayOfWeek.Thursday => "Thu", 
+        DayOfWeek.Friday => "Fri", 
+        DayOfWeek.Saturday => "Sat", 
+        DayOfWeek.Sunday => "Sun", 
+        _ => "" 
+    } : day switch 
+    { 
+        DayOfWeek.Monday => "Pon", 
+        DayOfWeek.Tuesday => "Wto", 
+        DayOfWeek.Wednesday => "Śro", 
+        DayOfWeek.Thursday => "Czw", 
+        DayOfWeek.Friday => "Pią", 
+        DayOfWeek.Saturday => "Sob", 
+        DayOfWeek.Sunday => "Nie", 
+        _ => "" 
+    };
+
+    private void OpenLessonModal(Lesson lesson) 
+    { 
+        HapticHelper.TriggerSelection();
+        SelectedLesson = lesson; 
+        IsLessonModalOpen = true; 
+    }
+    
+    private void OpenAddEventModal() 
+    { 
+        newEvTitle = ""; 
+        newEvDesc = ""; 
+        newEvPlace = ""; 
+        newEvGlobal = false; 
+        newEvImportant = false; 
+        var now = DateTime.Now;
+        newEvStartDate = DateOnly.FromDateTime(now);
+        newEvEndDate = DateOnly.FromDateTime(now);
+        newEvStartHour = now.Hour;
+        newEvStartMinute = (now.Minute / 5) * 5;
+        var endDt = now.AddHours(1);
+        newEvEndHour = endDt.Hour;
+        newEvEndMinute = (endDt.Minute / 5) * 5;
+        IsAddEventModalOpen = true; 
+    }
+    private void OpenTaskModal() { TaskType = "Zadanie"; taskTitle = ""; taskDesc = ""; IsLessonModalOpen = false; IsTaskExamModalOpen = true; }
+    private void OpenExamModal() { TaskType = "Kolokwium"; taskTitle = ""; taskDesc = ""; IsLessonModalOpen = false; IsTaskExamModalOpen = true; }
+    private void OpenNotesForLesson()
+    {
+        if (SelectedLesson != null)
+        {
+            CloseModals();
+            Navigation.NavigateTo("/notes");
+        }
+    }
+    private void OpenMoveModal() 
+    { 
+        if (SelectedLesson != null)
+        {
+            if (SelectedLesson.End < DateTime.Now)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Cannot modify classes that have already passed!" : "Nie można modyfikować zajęć, które już się odbyły!", MainLayout.ToastType.Warning);
+                return;
+            }
+            var start = SelectedLesson.Start.Year < 2024 ? DateTime.Today.AddHours(SelectedLesson.Start.Hour).AddMinutes(SelectedLesson.Start.Minute) : SelectedLesson.Start;
+            var end = SelectedLesson.End.Year < 2024 ? start.AddHours(1.5) : SelectedLesson.End;
+            moveDate = DateOnly.FromDateTime(start);
+            moveStartTime = TimeOnly.FromDateTime(start);
+            moveEndTime = TimeOnly.FromDateTime(end);
+        }
+        IsLessonModalOpen = false; 
+        IsMoveModalOpen = true; 
+    }
+    private void OpenRoomModal() 
+    { 
+        if (SelectedLesson != null)
+        {
+            if (SelectedLesson.End < DateTime.Now)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Cannot modify classes that have already passed!" : "Nie można modyfikować zajęć, które już się odbyły!", MainLayout.ToastType.Warning);
+                return;
+            }
+            newRoom = SelectedLesson.Place; 
+        }
+        IsLessonModalOpen = false; 
+        IsRoomModalOpen = true; 
+    }
+    private void OpenExportModal() { exportScope = "all"; exportWithAlarms = true; IsExportModalOpen = true; }
+
+    private void CloseModals() { IsLessonModalOpen = false; IsAddEventModalOpen = false; IsTaskExamModalOpen = false; IsMoveModalOpen = false; IsRoomModalOpen = false; IsExportModalOpen = false; RecalculateWeekMetrics(); }
+
+    private async Task ExecuteCalendarExport()
+    {
+        var prepared = ScheduleService.GetPreparedData();
+        IEnumerable<Lesson> lessonsToExport = exportScope == "week"
+            ? prepared.Where(l => l.Start >= CurrentWeekStart && l.Start < CurrentWeekStart.AddDays(DaysToDisplay))
+            : prepared;
+
+        if (!lessonsToExport.Any())
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "No classes to export in selected range." : "Brak zajęć do wyeksportowania w wybranym zakresie.", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        try
+        {
+            await CalendarExportService.ExportToSystemCalendarAsync(lessonsToExport, exportWithAlarms);
+            CloseModals();
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Opening Calendar..." : "Otwieranie Kalendarza...", MainLayout.ToastType.Success);
+        }
+        catch (Exception ex)
+        {
+            Layout?.ShowToast($"Błąd eksportu: {ex.Message}", MainLayout.ToastType.Error);
+        }
+    }
+
+    private async Task ExecuteShareIcs()
+    {
+        var prepared = ScheduleService.GetPreparedData();
+        IEnumerable<Lesson> lessonsToExport = exportScope == "week"
+            ? prepared.Where(l => l.Start >= CurrentWeekStart && l.Start < CurrentWeekStart.AddDays(DaysToDisplay))
+            : prepared;
+
+        if (!lessonsToExport.Any())
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "No classes to export." : "Brak zajęć do wyeksportowania.", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        try
+        {
+            await CalendarExportService.ShareIcsFileAsync(lessonsToExport, exportWithAlarms);
+            CloseModals();
+        }
+        catch (Exception ex)
+        {
+            Layout?.ShowToast($"Błąd: {ex.Message}", MainLayout.ToastType.Error);
+        }
+    }
+
+    private async Task ActionSaveEvent()
+    {
+        if (isModalActionInProgress) return;
+        if (string.IsNullOrWhiteSpace(newEvTitle))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please enter event title!" : "Podaj tytuł wydarzenia!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var start = newEvStartDate.ToDateTime(new TimeOnly(newEvStartHour, newEvStartMinute));
+        var end = newEvEndDate.ToDateTime(new TimeOnly(newEvEndHour, newEvEndMinute));
+        if (end <= start)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "End time must be after start time!" : "Godzina zakończenia musi być późniejsza niż godzina rozpoczęcia!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        isModalActionInProgress = true;
+        try
+        {
+
+            var newEvent = new Lesson 
+            { 
+                Id = ScheduleLogic.GenerateUniqueEventId(ScheduleService.CustomEvents.Select(c => c.Id)), 
+                Title = newEvTitle, 
+                Desc = newEvDesc, 
+                Start = start, 
+                End = end, 
+                OriginalStart = start, 
+                OriginalEnd = end, 
+                Place = string.IsNullOrWhiteSpace(newEvPlace) ? "Brak miejsca" : newEvPlace, 
+                OriginalPlace = string.IsNullOrWhiteSpace(newEvPlace) ? "Brak miejsca" : newEvPlace, 
+                Type = newEvGlobal ? "STAR" : "WŁASNE", 
+                IsPersonal = !newEvGlobal, 
+                Group = newEvGlobal ? "ALL" : "JA", 
+                Person = newEvGlobal ? (AppState.IsStarosta ? "Starosta" : "Admin") : "Ja", 
+                IsHighPriority = newEvImportant 
+            };
+            
+            await ScheduleService.AddCustomEventAsync(newEvent);
+            HapticHelper.TriggerSuccess();
+            
+            Layout?.ShowToast(newEvGlobal 
+                ? (CurrentLang == "en-US" ? "Cohort event published to cloud!" : "Opublikowano wydarzenie rocznika w chmurze!") 
+                : (CurrentLang == "en-US" ? "Personal event saved and synced across devices!" : "Zapisano własne wydarzenie (zsynchronizowano z chmurą)!"));
+            CloseModals();
+            RecalculateWeekMetrics();
+            StateHasChanged();
+            AppState.NotifyStateChanged();
+        }
+        finally
+        {
+            isModalActionInProgress = false;
+        }
+    }
+
+    private async Task ActionSaveTask()
+    {
+        if (isModalActionInProgress) return;
+        if (SelectedLesson != null)
+        {
+            isModalActionInProgress = true;
+            try
+            {
+                bool isExam = (TaskType == "Kolokwium");
+                string details = $"{taskTitle}\n{taskDesc}".Trim();
+                await ScheduleService.AddTaskOrExamAsync(SelectedLesson, isExam, details);
+                HapticHelper.TriggerSuccess();
+                
+                Layout?.ShowToast(CurrentLang == "en-US" 
+                    ? $"Successfully added item to {SelectedLesson.Title}." 
+                    : $"Pomyślnie dodano do przedmiotu.");
+                RecalculateWeekMetrics();
+                StateHasChanged();
+                AppState.NotifyStateChanged();
+                CloseModals();
+            }
+            finally
+            {
+                isModalActionInProgress = false;
+            }
+        }
+        else
+        {
+            CloseModals();
+        }
+    }
+
+    private async Task ActionCancel() 
+    { 
+        if (isModalActionInProgress) return;
+        if (SelectedLesson != null) 
+        {
+            if (SelectedLesson.End < DateTime.Now)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Cannot modify classes that have already passed!" : "Nie można modyfikować zajęć, które już się odbyły!", MainLayout.ToastType.Warning);
+                return;
+            }
+            isModalActionInProgress = true;
+            try
+            {
+                if (SelectedLesson.IsCanceled)
+                {
+                    await ScheduleService.RestoreLessonAsync(SelectedLesson);
+                    HapticHelper.TriggerSuccess();
+                    Layout?.ShowToast(CurrentLang == "en-US" ? "Class restored." : "Przywrócono zajęcia.", MainLayout.ToastType.Success);
+                }
+                else
+                {
+                    await ScheduleService.CancelLessonAsync(SelectedLesson);
+                    HapticHelper.TriggerWarning();
+                    Layout?.ShowToast(CurrentLang == "en-US" ? "Class cancelled!" : "Odwołano zajęcia!", MainLayout.ToastType.Warning);
+                }
+                RecalculateWeekMetrics();
+                StateHasChanged();
+                AppState.NotifyStateChanged();
+                CloseModals();
+            }
+            finally
+            {
+                isModalActionInProgress = false;
+            }
+        }
+        else
+        {
+            CloseModals(); 
+        }
+    }
+    
+    private async Task ActionDelete() 
+    { 
+        if (isModalActionInProgress) return;
+        if (SelectedLesson != null) 
+        {
+            isModalActionInProgress = true;
+            try
+            {
+                await ScheduleService.DeleteCustomEventAsync(SelectedLesson);
+                HapticHelper.TriggerWarning();
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Event deleted from calendar." : "Wydarzenie zostało usunięte z kalendarza.", MainLayout.ToastType.Warning);
+                RecalculateWeekMetrics();
+                StateHasChanged();
+                AppState.NotifyStateChanged();
+                CloseModals();
+            }
+            finally
+            {
+                isModalActionInProgress = false;
+            }
+        }
+        else
+        {
+            CloseModals(); 
+        }
+    }
+
+    private async Task ActionMove()
+    {
+        if (isModalActionInProgress) return;
+        if (SelectedLesson != null)
+        {
+            var newStart = moveDate.ToDateTime(moveStartTime);
+            var newEnd = moveDate.ToDateTime(moveEndTime);
+
+            if (newEnd <= newStart)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "End time must be after start time!" : "Godzina zakończenia musi być późniejsza niż start!", MainLayout.ToastType.Warning);
+                return;
+            }
+
+            isModalActionInProgress = true;
+            try
+            {
+                await ScheduleService.RescheduleLessonAsync(SelectedLesson, newStart, newEnd);
+                HapticHelper.TriggerSuccess();
+                
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Class rescheduled." : "Termin zajęć został przesunięty.", MainLayout.ToastType.Success);
+                RecalculateWeekMetrics();
+                StateHasChanged();
+                AppState.NotifyStateChanged();
+                CloseModals();
+            }
+            finally
+            {
+                isModalActionInProgress = false;
+            }
+        }
+        else
+        {
+            CloseModals();
+        }
+    }
+
+    private async Task ActionRoom() 
+    { 
+        if (isModalActionInProgress) return;
+        if (SelectedLesson != null && !string.IsNullOrWhiteSpace(newRoom)) 
+        {
+            isModalActionInProgress = true;
+            try
+            {
+                bool allFuture = (roomModalScope == "all");
+                int affected = await ScheduleService.ChangeRoomAsync(SelectedLesson, newRoom.Trim(), allFutureSemesterClasses: allFuture);
+                HapticHelper.TriggerSuccess();
+                
+                if (allFuture)
+                {
+                    Layout?.ShowToast(CurrentLang == "en-US" 
+                        ? $"Classroom changed to {newRoom} for {affected} classes till semester end!" 
+                        : $"Zmieniono salę na {newRoom} dla {affected} terminów do końca semestru!");
+                }
+                else
+                {
+                    Layout?.ShowToast(CurrentLang == "en-US" ? $"Classroom changed to: {newRoom}" : $"Zmieniono salę na: {newRoom}");
+                }
+                RecalculateWeekMetrics();
+                StateHasChanged();
+                AppState.NotifyStateChanged();
+                CloseModals();
+            }
+            finally
+            {
+                isModalActionInProgress = false;
+            }
+        }
+        else
+        {
+            CloseModals();
+        }
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        AppState.OnChange -= OnAppStateChanged;
+        ScheduleService.OnScheduleLoaded -= OnScheduleDataChanged;
+        try
+        {
+            Connectivity.Current.ConnectivityChanged -= OnConnectivityChanged;
+        }
+        catch { }
+    }
+}

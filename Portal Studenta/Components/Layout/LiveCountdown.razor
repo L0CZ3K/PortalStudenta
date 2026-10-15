@@ -1,0 +1,79 @@
+@implements IDisposable
+@inject Portal_Studenta.Services.ScheduleService ScheduleService
+
+<div class="schedule-list">
+    @if (OngoingEvent != null)
+    {
+        <div class="card color-danger">
+            <span class="badge ongoing">TRWAJĄ</span>
+            <h3 style="margin-top: 5px;">@OngoingEvent.Title</h3>
+            <p class="time">@OngoingEvent.Start.ToString("HH:mm") - @OngoingEvent.End.ToString("HH:mm")</p>
+            <p style="color: var(--text-muted);">📍 @OngoingEvent.Place</p>
+        </div>
+    }
+
+    @if (UpcomingEvent != null)
+    {
+        <div class="card @GetColor(UpcomingEvent)">
+            <span class="badge now">@GetCountdownText()</span>
+            <h3 style="margin-top: 5px;">@UpcomingEvent.Title</h3>
+            <p class="time">@UpcomingEvent.Start.ToString("HH:mm") - @UpcomingEvent.End.ToString("HH:mm")</p>
+            <p style="color: var(--text-muted);">📍 @UpcomingEvent.Place</p>
+        </div>
+    }
+
+    @if (OngoingEvent == null && UpcomingEvent == null)
+    {
+        <!-- Luźniejszy komunikat tylko w tym miejscu -->
+        <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+            <p style="font-size: 2rem;">☕</p>
+            <p>Brak zajęć na dzisiaj. Fajrant!</p>
+        </div>
+    }
+</div>
+
+@code {
+    private Lesson? OngoingEvent;
+    private Lesson? UpcomingEvent;
+    private System.Timers.Timer? _timer;
+
+    protected override void OnInitialized()
+    {
+        ScheduleService.OnScheduleLoaded += HandleScheduleLoaded;
+        Refresh();
+        _timer = new System.Timers.Timer(10000);
+        _timer.Elapsed += async (s, e) => await InvokeAsync(() => { Refresh(); StateHasChanged(); });
+        _timer.Start();
+    }
+
+    private void HandleScheduleLoaded()
+    {
+        _ = InvokeAsync(() =>
+        {
+            Refresh();
+            StateHasChanged();
+        });
+    }
+
+    private void Refresh()
+    {
+        var data = ScheduleService.GetPreparedData().Concat(ScheduleService.CustomEvents).ToList();
+        var now = DateTime.Now;
+        OngoingEvent = data.FirstOrDefault(e => !e.IsCanceled && e.Start <= now && e.End > now);
+        UpcomingEvent = data.Where(e => !e.IsCanceled && e.Start > now && e.Start.Date == now.Date)
+                            .OrderBy(e => e.Start).FirstOrDefault();
+    }
+
+    private string GetCountdownText() =>
+        (UpcomingEvent!.Start - DateTime.Now).TotalMinutes < 60
+        ? $"Za {Math.Floor((UpcomingEvent.Start - DateTime.Now).TotalMinutes)} min"
+        : UpcomingEvent.Start.ToString("HH:mm");
+
+    private string GetColor(Lesson l) => l.IsHighPriority ? "color-danger" : $"color-{l.Type.ToLower()}";
+
+    public void Dispose()
+    {
+        ScheduleService.OnScheduleLoaded -= HandleScheduleLoaded;
+        _timer?.Dispose();
+    }
+}

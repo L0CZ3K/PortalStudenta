@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Markdig" Version="1.4.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="sqlite-net-pcl" Version="1.11.285" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="FirebaseDatabase.net" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Portal Studenta\Models\*.cs" LinkBase="Models" />
+    <Compile Include="..\Portal Studenta\Services\FirebaseSecurityHelper.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\WeekParityHelper.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\ScheduleLogic.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\IcsCalendarHelper.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\AnnouncementLogic.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\OAuth1Helper.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\WhiteboardImageOptimizer.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\NoteService.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\UniversityHealthLogic.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\ProfileLogic.cs" LinkBase="Services" />
+    <Compile Include="..\Portal Studenta\Services\NotificationMessageLogic.cs" LinkBase="Services" />
+  </ItemGroup>
+
+</Project>

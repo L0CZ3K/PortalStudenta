@@ -1,0 +1,489 @@
+@inherits LayoutComponentBase
+@inject Portal_Studenta.Services.AppState AppState
+@inject Portal_Studenta.Services.UsosAuthService AuthService
+@inject Portal_Studenta.Services.UniversityService UniversityService
+@inject Portal_Studenta.Services.ProfileService ProfileService
+@inject Portal_Studenta.Services.FirebaseService FirebaseService
+@inject Portal_Studenta.Services.ScheduleService ScheduleService
+@inject Portal_Studenta.Services.NotificationService NotificationService
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<div class="app-shell">
+
+    <!-- ==============================================
+         LEWY SIDEBAR (Desktop / Mac / PC >= 768px)
+         ============================================== -->
+    <aside class="sidebar">
+        <div class="sidebar-logo">
+            <div class="sidebar-logo-squircle">
+                <span>🎓</span>
+            </div>
+            <div class="sidebar-brand">
+                <span class="sidebar-logo-text">UniAvio</span>
+                <span class="sidebar-logo-sub" style="display: flex; align-items: center; gap: 6px;" title="@UniversityService.StatusMessage">
+                    <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: @UniversityService.DotColor; box-shadow: 0 0 5px @UniversityService.DotColor;"></span>
+                    <span style="cursor: pointer;" @onclick="HandleUniChipClick">@UniversityService.StatusLabel</span>
+                    <button class="status-refresh-btn @(isCheckingStatus ? "spinning" : "")" @onclick="RefreshServerStatus" title="Odśwież status serwera">🔄</button>
+                </span>
+            </div>
+        </div>
+
+        <nav class="sidebar-nav">
+            <NavLink class="sidebar-item" href="" Match="NavLinkMatch.All">
+                <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H4a1 1 0 0 1-1-1v-9.5z"/>
+                </svg>
+                <span class="sidebar-label">@(CurrentLang == "en-US" ? "Dashboard" : "Panel")</span>
+            </NavLink>
+
+            <NavLink class="sidebar-item" href="schedule">
+                <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span class="sidebar-label">@(CurrentLang == "en-US" ? "Schedule" : "Plan Zajęć")</span>
+            </NavLink>
+
+            <NavLink class="sidebar-item" href="announcements">
+                <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                <span class="sidebar-label">@(CurrentLang == "en-US" ? "Announcements" : "Ogłoszenia")</span>
+            </NavLink>
+
+            <NavLink class="sidebar-item" href="notes">
+                <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                <span class="sidebar-label">@(CurrentLang == "en-US" ? "Notes" : "Notatki")</span>
+            </NavLink>
+
+            @if (AppState.HasManagementPrivileges)
+            {
+                <NavLink class="sidebar-item sidebar-starosta" href="admin">
+                    @if (AppState.IsAdmin && !AppState.IsStarosta)
+                    {
+                        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        <span class="sidebar-label">@(CurrentLang == "en-US" ? "Admin" : "Admin")</span>
+                    }
+                    else
+                    {
+                        <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 4l3 12h14l3-12-5 6-5-6-5 6z"/>
+                            <circle cx="12" cy="19" r="2"/>
+                        </svg>
+                        <span class="sidebar-label">@(CurrentLang == "en-US" ? "Starosta" : "Starosta")</span>
+                    }
+                </NavLink>
+            }
+        </nav>
+
+        <div class="sidebar-footer">
+            <NavLink class="sidebar-item profile-sidebar-item" href="profile">
+                <svg class="nav-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                </svg>
+                <span class="sidebar-label">@(CurrentLang == "en-US" ? "Profile" : "Profil")</span>
+            </NavLink>
+        </div>
+    </aside>
+
+    <!-- ==============================================
+         PRAWA STREFA (Topbar mobilny + Treść + Tab Bar)
+         ============================================== -->
+    <div class="main-area">
+
+        <!-- GÓRNY PASEK MOBILNY (dyskretny, z Safe Area pod Dynamic Island) -->
+        <header class="mobile-topbar">
+            <div class="mobile-topbar-left">
+                <div class="mobile-app-icon">🎓</div>
+                <span class="mobile-topbar-title">UniAvio</span>
+            </div>
+            <div class="mobile-topbar-right" style="display: flex; align-items: center; gap: 6px;">
+                <span class="mobile-uni-chip" @onclick="HandleUniChipClick" style="cursor: pointer;" title="@UniversityService.StatusMessage">
+                    <span class="uni-chip-dot" style="background-color: @UniversityService.DotColor; box-shadow: 0 0 6px @UniversityService.DotColor;"></span>
+                    <span>@UniversityService.StatusLabel</span>
+                </span>
+                <button class="status-refresh-btn @(isCheckingStatus ? "spinning" : "")" @onclick="RefreshServerStatus" title="Odśwież status serwera">🔄</button>
+            </div>
+        </header>
+
+        <!-- TREŚĆ GŁÓWNA STRONY -->
+        <main class="main-content">
+            <div class="content-wrapper">
+                <CascadingValue Value="this">
+                    @Body
+                </CascadingValue>
+            </div>
+        </main>
+
+        <!-- ==============================================
+             DOLNY PASEK ZAKŁADEK (NATIVE MOBILE TAB BAR dla Mobile < 768px)
+             ============================================== -->
+        <nav class="mobile-tabbar" aria-label="Nawigacja mobilna">
+            <NavLink class="tabbar-item" href="" Match="NavLinkMatch.All">
+                <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-4v6H4a1 1 0 0 1-1-1v-9.5z"/>
+                </svg>
+                <span class="tab-label">@(CurrentLang == "en-US" ? "Home" : "Panel")</span>
+            </NavLink>
+
+            <NavLink class="tabbar-item" href="schedule">
+                <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+                <span class="tab-label">@(CurrentLang == "en-US" ? "Schedule" : "Plan")</span>
+            </NavLink>
+
+            <NavLink class="tabbar-item" href="announcements">
+                <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                </svg>
+                <span class="tab-label">@(CurrentLang == "en-US" ? "Board" : "Tablica")</span>
+            </NavLink>
+
+            <NavLink class="tabbar-item" href="notes">
+                <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                </svg>
+                <span class="tab-label">@(CurrentLang == "en-US" ? "Notes" : "Notatki")</span>
+            </NavLink>
+
+            @if (AppState.HasManagementPrivileges)
+            {
+                <NavLink class="tabbar-item tabbar-starosta" href="admin">
+                    @if (AppState.IsAdmin && !AppState.IsStarosta)
+                    {
+                        <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        <span class="tab-label">@(CurrentLang == "en-US" ? "Admin" : "Admin")</span>
+                    }
+                    else
+                    {
+                        <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 4l3 12h14l3-12-5 6-5-6-5 6z"/>
+                            <circle cx="12" cy="19" r="2"/>
+                        </svg>
+                        <span class="tab-label">@(CurrentLang == "en-US" ? "Starosta" : "Starosta")</span>
+                    }
+                </NavLink>
+            }
+
+            <NavLink class="tabbar-item" href="profile">
+                <svg class="tab-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                </svg>
+                <span class="tab-label">@(CurrentLang == "en-US" ? "Profile" : "Profil")</span>
+            </NavLink>
+        </nav>
+
+    </div>
+</div>
+
+<!-- ==============================================
+     TOAST NOTIFICATIONS SYSTEM
+     ============================================== -->
+<div class="toast-container">
+    @foreach (var toast in ActiveToasts)
+    {
+        <div class="toast-item @toast.TypeClass">
+            <span class="toast-icon">@toast.Icon</span>
+            <span class="toast-text">@toast.Message</span>
+        </div>
+    }
+</div>
+
+@code {
+    private List<ToastMessage> ActiveToasts = new();
+    private string CurrentLang = "pl-PL";
+
+    public enum ToastType { Success, Info, Warning, Error }
+
+    public class ToastMessage
+    {
+        public string Message { get; set; } = "";
+        public ToastType Type { get; set; }
+        public string TypeClass => Type.ToString().ToLower();
+        public string Icon => Type switch
+        {
+            ToastType.Success => "✓",
+            ToastType.Warning => "!",
+            ToastType.Error => "✕",
+            _ => "ℹ"
+        };
+    }
+
+    public void ShowToast(string message, ToastType type = ToastType.Success)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            var toast = new ToastMessage { Message = message, Type = type };
+            ActiveToasts.Add(toast);
+            StateHasChanged();
+
+            await Task.Delay(3000);
+            ActiveToasts.Remove(toast);
+            StateHasChanged();
+        });
+    }
+
+    public void HandleUniChipClick()
+    {
+        var msg = string.IsNullOrEmpty(UniversityService.StatusMessage) 
+            ? $"Status: {UniversityService.StatusLabel}" 
+            : UniversityService.StatusMessage;
+        
+        var toastType = UniversityService.CurrentHealth switch
+        {
+            Portal_Studenta.Services.ConnectionHealth.Online => ToastType.Success,
+            Portal_Studenta.Services.ConnectionHealth.Degraded => ToastType.Warning,
+            _ => ToastType.Error
+        };
+
+        ShowToast(msg, toastType);
+    }
+
+    private bool isCheckingStatus = false;
+    public async Task RefreshServerStatus()
+    {
+        if (isCheckingStatus) return;
+        isCheckingStatus = true;
+        StateHasChanged();
+        try
+        {
+            await UniversityService.RefreshHealthAsync();
+            var msg = string.IsNullOrEmpty(UniversityService.StatusMessage) 
+                ? $"Status: {UniversityService.StatusLabel}" 
+                : UniversityService.StatusMessage;
+            var toastType = UniversityService.CurrentHealth switch
+            {
+                Portal_Studenta.Services.ConnectionHealth.Online => ToastType.Success,
+                Portal_Studenta.Services.ConnectionHealth.Degraded => ToastType.Warning,
+                _ => ToastType.Error
+            };
+            ShowToast(msg, toastType);
+        }
+        finally
+        {
+            isCheckingStatus = false;
+            StateHasChanged();
+        }
+    }
+
+    private readonly SemaphoreSlim _userSessionInitLock = new(1, 1);
+    private bool _isUserSessionInitialized = false;
+
+    private async Task EnsureUserSessionInitializedAsync()
+    {
+        await _userSessionInitLock.WaitAsync();
+        try
+        {
+            if (_isUserSessionInitialized) return;
+
+            if (!ProfileService.IsLoaded)
+            {
+                await ProfileService.LoadProfileAsync();
+            }
+
+            string currentId = ProfileService.StudentNumber;
+            if (string.IsNullOrEmpty(currentId)) currentId = Preferences.Default.Get("user_student_number", "");
+            string currentSec = ProfileService.Id;
+            if (string.IsNullOrEmpty(currentSec)) currentSec = Preferences.Default.Get("user_usos_id", "");
+
+            if (string.IsNullOrEmpty(currentId) && string.IsNullOrEmpty(currentSec))
+            {
+                return;
+            }
+
+            DateTime? curSession = GetSessionStartedAt();
+            bool isDeleted = await FirebaseService.IsUserAccountDeletedAsync(currentId, currentSec, curSession);
+            if (isDeleted)
+            {
+                await InvokeAsync(async () =>
+                {
+                    await PerformLogoutAsync();
+                });
+                return;
+            }
+
+            FirebaseService.SubscribeToUserAccountDeletion(currentId, () =>
+            {
+                InvokeAsync(async () =>
+                {
+                    await PerformLogoutAsync();
+                });
+            }, currentSec, curSession);
+
+            await FirebaseService.SyncUserSessionAsync(currentId, AppState, ScheduleService);
+            _isUserSessionInitialized = true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MainLayout] Błąd synchronizacji sesji użytkownika: {ex.Message}");
+        }
+        finally
+        {
+            _userSessionInitLock.Release();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentLang = AppState.Language;
+        AppState.OnChange += OnAppStateChanged;
+        UniversityService.OnHealthChanged += OnHealthChanged;
+        NotificationService.OnInAppNotification += HandleInAppNotification;
+        ProfileService.OnProfileLoaded += OnProfileLoaded;
+        UsosAuthService.OnSessionExpired += HandleSessionExpired;
+
+        if (!await AuthService.IsAuthenticatedAsync())
+        {
+            Navigation.NavigateTo("/login");
+            return;
+        }
+
+        // Asynchroniczna weryfikacja aktywności tokenu w USOS przy starcie
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                bool isValid = await AuthService.ValidateTokenAsync();
+                if (!isValid)
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        ShowToast(
+                            CurrentLang == "en-US" 
+                                ? "Your USOS session has expired. Please sign in again." 
+                                : "Twoja sesja USOS wygasła lub token został cofnięty. Zaloguj się ponownie.", 
+                            ToastType.Error
+                        );
+                        await PerformLogoutAsync();
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MainLayout] Startup token validation error: {ex.Message}");
+            }
+        });
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await NotificationService.EnsurePermissionRequestedAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MainLayout] Notification permission check error: {ex.Message}");
+            }
+        });
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await EnsureUserSessionInitializedAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MainLayout] Startup user session check error: {ex.Message}");
+            }
+        });
+    }
+
+    private DateTime? GetSessionStartedAt()
+    {
+        var sessionLoginStr = Preferences.Default.Get("session_login_at", "");
+        if (!string.IsNullOrEmpty(sessionLoginStr) && DateTime.TryParse(sessionLoginStr, null, System.Globalization.DateTimeStyles.RoundtripKind, out var dt))
+        {
+            return dt;
+        }
+        return null;
+    }
+
+    private void OnProfileLoaded()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await EnsureUserSessionInitializedAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MainLayout] OnProfileLoaded session check error: {ex.Message}");
+            }
+        });
+    }
+
+    private void HandleInAppNotification(string title, string body)
+    {
+        ShowToast($"{title}: {body}", ToastType.Warning);
+    }
+
+    public void Dispose()
+    {
+        AppState.OnChange -= OnAppStateChanged;
+        UniversityService.OnHealthChanged -= OnHealthChanged;
+        NotificationService.OnInAppNotification -= HandleInAppNotification;
+        ProfileService.OnProfileLoaded -= OnProfileLoaded;
+        UsosAuthService.OnSessionExpired -= HandleSessionExpired;
+        _userSessionInitLock.Dispose();
+    }
+
+    private void HandleSessionExpired()
+    {
+        InvokeAsync(async () =>
+        {
+            ShowToast(
+                CurrentLang == "en-US" 
+                    ? "Your USOS session has expired. Please sign in again." 
+                    : "Twoja sesja USOS wygasła lub token został cofnięty. Zaloguj się ponownie.", 
+                ToastType.Error
+            );
+            await PerformLogoutAsync();
+        });
+    }
+
+    private void OnAppStateChanged()
+    {
+        CurrentLang = AppState.Language;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnHealthChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task PerformLogoutAsync()
+    {
+        FirebaseService.UnsubscribeAllSubscriptions();
+        await AuthService.LogoutAsync();
+        ProfileService.Clear();
+        ScheduleService.Clear();
+        AppState.Reset();
+        Navigation.NavigateTo("/login", true);
+    }
+}

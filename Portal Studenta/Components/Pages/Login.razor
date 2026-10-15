@@ -1,0 +1,946 @@
+@page "/login"
+@layout Portal_Studenta.Components.Layout.EmptyLayout
+@inject NavigationManager Navigation
+@inject Portal_Studenta.Services.UsosAuthService AuthService
+@inject Portal_Studenta.Services.UniversityService UniversityService
+@inject Microsoft.Extensions.Localization.IStringLocalizer<Portal_Studenta.Resources.Language.AppStrings> Loc
+@inject Portal_Studenta.Services.FirebaseService FirebaseService
+@inject Portal_Studenta.Services.ProfileService ProfileService
+
+<div class="login-viewport">
+    <!-- Główna karta logowania (Glassmorphism/Material) -->
+    <main class="login-card">
+        
+        <!-- Header: Sygnet + Tytuł -->
+        <header class="login-header">
+            <div class="app-icon-squircle">
+                <span class="app-icon-glyph">🎓</span>
+            </div>
+            <h1 class="app-title">UniAvio</h1>
+            <p class="app-tagline">@(IsEn ? "Student Portal" : "Portal Studenta")</p>
+
+            <!-- Chip wyboru uczelni ze wskaźnikiem serwera -->
+            <button class="uni-chip-button" @onclick="OpenUniversityModal" title="@GetServerTooltip()">
+                <span class="status-indicator-dot @GetStatusClass()"></span>
+                <span class="uni-chip-name">@currentUni.Code • @currentUni.FullName</span>
+                <span class="uni-chip-chevron">▾</span>
+            </button>
+        </header>
+
+        <!-- Sekcja akcji -->
+        <div class="login-action-area">
+            @if (isLoading)
+            {
+                <div class="login-loading-box">
+                    <div class="login-spinner"></div>
+                    <span class="login-loading-label">@(IsEn ? "Connecting to USOS..." : "Łączenie z USOS...")</span>
+                </div>
+            }
+            else
+            {
+                <button class="login-primary-btn" @onclick="LoginWithUsos" disabled="@isLoading">
+                    <span>@(IsEn ? $"Sign in with USOS {currentUni.Code}" : $"Zaloguj przez USOS {currentUni.Code}")</span>
+                </button>
+
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                    <div class="login-error-callout">
+                        <span class="error-glyph">⚠️</span>
+                        <div class="error-text">@errorMessage</div>
+                    </div>
+                }
+            }
+        </div>
+
+        <!-- Stopka bezpieczeństwa -->
+        <footer class="login-card-footer">
+            <p class="security-caption">
+                @(IsEn 
+                    ? "Direct OAuth 1.0a connection with official university servers."
+                    : "Bezpieczne połączenie OAuth 1.0a z oficjalnymi serwerami uczelni.")
+            </p>
+        </footer>
+    </main>
+
+    <!-- Przełącznik języka (Segmented Control) na dole ekranu -->
+    <nav class="login-segmented-bar" aria-label="Language selection">
+        <button class="segment-pill @(currentLang == "pl-PL" ? "active" : "")" @onclick='() => ChangeLanguage("pl-PL")'>
+            Polski
+        </button>
+        <button class="segment-pill @(currentLang == "en-US" ? "active" : "")" @onclick='() => ChangeLanguage("en-US")'>
+            English
+        </button>
+    </nav>
+</div>
+
+<!-- =========================================
+     ARKUSZ WYBORU UCZELNI (MODAL BOTTOM SHEET)
+     ========================================= -->
+@if (isUniModalOpen)
+{
+    <div class="login-sheet-backdrop" @onclick="CloseUniversityModal">
+        <div class="login-sheet-panel" @onclick:stopPropagation="true">
+            <div class="sheet-handle"></div>
+            
+            <div class="sheet-header">
+                <div>
+                    <h3 class="sheet-title">@(IsEn ? "Select University" : "Wybór Uczelni")</h3>
+                    <p class="sheet-subtitle">@(IsEn ? "USOS instance and connection health" : "Instancja USOS i diagnostyka serwerów")</p>
+                </div>
+                <button class="sheet-close-btn" @onclick="CloseUniversityModal" aria-label="Close">✕</button>
+            </div>
+
+            <!-- Dyskretny pasek statusu wybranego serwera -->
+            <div class="server-health-strip @GetStatusClass()">
+                <div class="health-meta">
+                    <span class="status-indicator-dot @GetStatusClass()"></span>
+                    <span class="health-text">
+                        @if (serverStatus == Portal_Studenta.Services.ServerStatus.Online)
+                        {
+                            @(IsEn ? $"USOS Online ({serverPingMs} ms)" : $"Serwery USOS aktywne ({serverPingMs} ms)")
+                        }
+                        else if (serverStatus == Portal_Studenta.Services.ServerStatus.Checking)
+                        {
+                            @(IsEn ? "Checking servers..." : "Sprawdzanie stanu serwerów...")
+                        }
+                        else
+                        {
+                            @(IsEn ? "USOS Server Unreachable" : "Brak odpowiedzi serwera USOS")
+                        }
+                    </span>
+                </div>
+                <button class="health-refresh-link" @onclick="() => CheckServerHealthAsync(currentUni)" disabled="@isCheckingServer">
+                    @(isCheckingServer ? "..." : (IsEn ? "Refresh" : "Odśwież"))
+                </button>
+            </div>
+
+            <!-- Pole wyszukiwania -->
+            <div class="sheet-search-wrap">
+                <span class="search-glyph">􀊫</span>
+                <input type="text" class="sheet-search-input" placeholder="@(IsEn ? "Search university..." : "Szukaj uczelni...")" @bind="searchTerm" @bind:event="oninput" />
+            </div>
+
+            <!-- Lista uczelni (Modern Table View) -->
+            <div class="sheet-list">
+                @foreach (var uni in FilteredUniversities)
+                {
+                    bool isSelected = uni.Code.Equals(currentUni.Code, StringComparison.OrdinalIgnoreCase);
+                    <div class="sheet-row @(isSelected ? "selected" : "")" @onclick="() => SelectUniversity(uni)">
+                        <div class="row-content">
+                            <div class="row-title-line">
+                                <span class="row-code">@uni.ShortName</span>
+                                <span class="row-name">@uni.FullName</span>
+                            </div>
+                            <span class="row-cities">@uni.Cities</span>
+                        </div>
+
+                        <div class="row-action">
+                            @if (isSelected)
+                            {
+                                <span class="checkmark-glyph">✓</span>
+                            }
+                            else if (!uni.IsSupported)
+                            {
+                                <span class="soon-badge">@(IsEn ? "Coming soon" : "Wkrótce")</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="sheet-footer">
+                <button class="sheet-done-btn" @onclick="CloseUniversityModal">
+                    @(IsEn ? "Done" : "Gotowe")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    /* =========================================
+       TYPOGRAFIA I GŁÓWNY WIDOK
+       ========================================= */
+    .login-viewport {
+        min-height: 100vh;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 40px 24px 90px 24px;
+        box-sizing: border-box;
+        position: relative;
+        background: radial-gradient(ellipse 90% 70% at 50% 42%, #141a26 0%, #080a0f 100%);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        overflow-x: hidden;
+    }
+
+    :global(body.light-mode) .login-viewport {
+        background: radial-gradient(ellipse 90% 70% at 50% 42%, #ffffff 0%, #eceff4 100%);
+    }
+
+    /* Nowoczesna karta logowania z efektem szkła (Glassmorphism) */
+    .login-card {
+        width: 100%;
+        max-width: 480px;
+        background: rgba(23, 27, 36, 0.78);
+        backdrop-filter: blur(35px);
+        -webkit-backdrop-filter: blur(35px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 26px;
+        padding: 50px 42px;
+        box-sizing: border-box;
+        box-shadow: 0 24px 60px -12px rgba(0, 0, 0, 0.6),
+                    0 0 0 1px rgba(255, 255, 255, 0.04);
+        display: flex;
+        flex-direction: column;
+        gap: 32px;
+        text-align: center;
+        animation: cardFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    :global(body.light-mode) .login-card {
+        background: rgba(255, 255, 255, 0.88);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.12),
+                    0 0 0 1px rgba(0, 0, 0, 0.04);
+    }
+
+    @@keyframes cardFadeIn {
+        from { opacity: 0; transform: scale(0.97) translateY(14px); }
+        to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    /* =========================================
+       NAGŁÓWEK I LOGO
+       ========================================= */
+    .login-header {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .app-icon-squircle {
+        width: 72px;
+        height: 72px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 6px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    :global(body.light-mode) .app-icon-squircle {
+        background: rgba(0, 0, 0, 0.04);
+        border: 1px solid rgba(0, 0, 0, 0.06);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+    }
+
+    .app-icon-glyph {
+        font-size: 2.3rem;
+        line-height: 1;
+    }
+
+    .app-title {
+        font-size: 2.35rem;
+        font-weight: 700;
+        letter-spacing: -0.03em;
+        margin: 0;
+        color: var(--text-main, #ffffff);
+    }
+
+    .app-tagline {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 400;
+        color: var(--text-muted, #86868b);
+    }
+
+    /* =========================================
+       CHIP UCZELNI (MINIMALISTYCZNA PIGUŁKA)
+       ========================================= */
+    .uni-chip-button {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 16px;
+        border-radius: 9999px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.11);
+        color: var(--text-main, #ffffff);
+        font-size: 0.88rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.18s ease;
+        margin-top: 8px;
+        font-family: inherit;
+    }
+
+    :global(body.light-mode) .uni-chip-button {
+        background: rgba(0, 0, 0, 0.04);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        color: var(--text-main, #1d1d1f);
+    }
+
+    .uni-chip-button:hover {
+        background: rgba(255, 255, 255, 0.09);
+        border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    :global(body.light-mode) .uni-chip-button:hover {
+        background: rgba(0, 0, 0, 0.07);
+    }
+
+    .uni-chip-name {
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .uni-chip-chevron {
+        font-size: 0.72rem;
+        color: var(--text-muted, #86868b);
+    }
+
+    /* Wskaźnik stanu serwera (dyskretna kropka) */
+    .status-indicator-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        transition: background-color 0.2s;
+    }
+
+    .status-indicator-dot.online {
+        background-color: #34c759;
+    }
+
+    .status-indicator-dot.checking {
+        background-color: #ff9500;
+        animation: subtleBlink 1.4s infinite ease-in-out;
+    }
+
+    .status-indicator-dot.offline {
+        background-color: #ff453a;
+    }
+
+    @@keyframes subtleBlink {
+        0%, 100% { opacity: 0.35; }
+        50% { opacity: 1; }
+    }
+
+    /* =========================================
+       GŁÓWNY PRZYCISK AKCJI
+       ========================================= */
+    .login-action-area {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .login-primary-btn {
+        width: 100%;
+        padding: 16px 24px;
+        border: none;
+        border-radius: 14px;
+        background-color: var(--primary-color, #0071e3);
+        color: #ffffff;
+        font-size: 1.05rem;
+        font-weight: 600;
+        letter-spacing: -0.015em;
+        cursor: pointer;
+        transition: opacity 0.15s ease, transform 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        box-shadow: 0 4px 16px rgba(0, 113, 227, 0.35);
+    }
+
+    .login-primary-btn:hover {
+        opacity: 0.94;
+        transform: translateY(-1px);
+        box-shadow: 0 8px 24px rgba(0, 113, 227, 0.45);
+    }
+
+    .login-primary-btn:active {
+        opacity: 0.85;
+        transform: scale(0.99);
+    }
+
+    /* Stan ładowania */
+    .login-loading-box {
+        padding: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+    }
+
+    .login-spinner {
+        width: 22px;
+        height: 22px;
+        border: 2.5px solid rgba(255, 255, 255, 0.2);
+        border-top-color: var(--primary-color, #0071e3);
+        border-radius: 50%;
+        animation: spinAnim 0.8s linear infinite;
+    }
+
+    @@keyframes spinAnim {
+        to { transform: rotate(360deg); }
+    }
+
+    .login-loading-label {
+        font-size: 0.95rem;
+        color: var(--text-muted, #86868b);
+        font-weight: 500;
+    }
+
+    /* Błąd */
+    .login-error-callout {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+        border-radius: 11px;
+        background: rgba(255, 69, 58, 0.1);
+        border: 1px solid rgba(255, 69, 58, 0.2);
+        font-size: 0.85rem;
+        color: #ff453a;
+        text-align: left;
+    }
+
+    .error-glyph {
+        font-size: 1rem;
+        flex-shrink: 0;
+    }
+
+    .error-text {
+        line-height: 1.4;
+    }
+
+    /* =========================================
+       STOPKA KARTY
+       ========================================= */
+    .login-card-footer {
+        padding-top: 6px;
+    }
+
+    .security-caption {
+        margin: 0;
+        font-size: 0.82rem;
+        line-height: 1.4;
+        color: var(--text-muted, #86868b);
+    }
+
+    /* =========================================
+       SEGMENTED CONTROL (WYBÓR JĘZYKA)
+       ========================================= */
+    .login-segmented-bar {
+        position: fixed;
+        bottom: 30px;
+        display: inline-flex;
+        background: rgba(255, 255, 255, 0.07);
+        backdrop-filter: blur(25px);
+        -webkit-backdrop-filter: blur(255);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 9999px;
+        padding: 4px;
+        z-index: 40;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+    }
+
+    :global(body.light-mode) .login-segmented-bar {
+        background: rgba(0, 0, 0, 0.06);
+        border: 1px solid rgba(0, 0, 0, 0.08);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.05);
+    }
+
+    .segment-pill {
+        background: transparent;
+        border: none;
+        outline: none;
+        padding: 6px 18px;
+        border-radius: 9999px;
+        font-size: 0.82rem;
+        font-weight: 500;
+        color: var(--text-muted, #86868b);
+        cursor: pointer;
+        transition: all 0.18s ease;
+    }
+
+    .segment-pill:hover {
+        color: var(--text-main, #ffffff);
+    }
+
+    .segment-pill.active {
+        background: rgba(255, 255, 255, 0.16);
+        color: var(--text-main, #ffffff);
+        font-weight: 600;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    }
+
+    :global(body.light-mode) .segment-pill.active {
+        background: #ffffff;
+        color: #1d1d1f;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    /* =========================================
+       ARKUSZ WYBORU UCZELNI (MODAL BOTTOM SHEET)
+       ========================================= */
+    .login-sheet-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        animation: sheetFade 0.2s ease;
+    }
+
+    @@keyframes sheetFade {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    .login-sheet-panel {
+        background: var(--card-bg, #1a1d24);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 18px;
+        width: 100%;
+        max-width: 440px;
+        max-height: 82vh;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+        overflow: hidden;
+        animation: sheetPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @@keyframes sheetPop {
+        from { transform: scale(0.97) translateY(8px); opacity: 0; }
+        to { transform: scale(1) translateY(0); opacity: 1; }
+    }
+
+    .sheet-handle {
+        width: 36px;
+        height: 4px;
+        border-radius: 9999px;
+        background: rgba(255, 255, 255, 0.15);
+        margin: 10px auto 0 auto;
+    }
+
+    .sheet-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 14px 20px 12px 20px;
+    }
+
+    .sheet-title {
+        margin: 0;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--text-main, #ffffff);
+    }
+
+    .sheet-subtitle {
+        margin: 2px 0 0 0;
+        font-size: 0.78rem;
+        color: var(--text-muted, #86868b);
+    }
+
+    .sheet-close-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: none;
+        color: var(--text-muted, #86868b);
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: background-color 0.15s;
+    }
+
+    .sheet-close-btn:hover {
+        background: rgba(255, 255, 255, 0.14);
+        color: var(--text-main, #ffffff);
+    }
+
+    /* Pasek stanu serwera */
+    .server-health-strip {
+        margin: 0 20px 12px 20px;
+        padding: 8px 12px;
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .health-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .health-text {
+        font-size: 0.78rem;
+        color: var(--text-main, #ffffff);
+        font-weight: 500;
+    }
+
+    .health-refresh-link {
+        background: none;
+        border: none;
+        color: var(--primary-color, #0071e3);
+        font-size: 0.75rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 0;
+    }
+
+    .health-refresh-link:hover {
+        text-decoration: underline;
+    }
+
+    /* Szukarka */
+    .sheet-search-wrap {
+        position: relative;
+        margin: 0 20px 12px 20px;
+    }
+
+    .search-glyph {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.8rem;
+        color: var(--text-muted, #86868b);
+        pointer-events: none;
+    }
+
+    .sheet-search-input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 8px 12px 8px 30px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 9px;
+        color: var(--text-main, #ffffff);
+        font-size: 0.85rem;
+        outline: none;
+        font-family: inherit;
+    }
+
+    .sheet-search-input:focus {
+        border-color: var(--primary-color, #0071e3);
+    }
+
+    /* Lista (Modern Table Cells) */
+    .sheet-list {
+        padding: 0 20px;
+        overflow-y: auto;
+        max-height: 280px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .sheet-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        cursor: pointer;
+        border-radius: 8px;
+        transition: background-color 0.12s ease;
+    }
+
+    .sheet-row:last-child {
+        border-bottom: none;
+    }
+
+    .sheet-row:hover {
+        background: rgba(255, 255, 255, 0.04);
+    }
+
+    .sheet-row.selected {
+        background: rgba(0, 113, 227, 0.1);
+    }
+
+    .row-content {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        text-align: left;
+    }
+
+    .row-title-line {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .row-code {
+        font-size: 0.72rem;
+        font-weight: 700;
+        color: var(--text-muted, #86868b);
+    }
+
+    .row-name {
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: var(--text-main, #ffffff);
+    }
+
+    .row-cities {
+        font-size: 0.72rem;
+        color: var(--text-muted, #86868b);
+    }
+
+    .checkmark-glyph {
+        color: #34c759;
+        font-size: 0.95rem;
+        font-weight: 700;
+    }
+
+    .soon-badge {
+        font-size: 0.7rem;
+        color: var(--text-muted, #86868b);
+        background: rgba(255, 255, 255, 0.05);
+        padding: 2px 6px;
+        border-radius: 5px;
+    }
+
+    .sheet-footer {
+        padding: 14px 20px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        display: flex;
+        justify-content: flex-end;
+    }
+
+    .sheet-done-btn {
+        padding: 8px 20px;
+        border-radius: 8px;
+        background: var(--primary-color, #0071e3);
+        color: #ffffff;
+        font-size: 0.85rem;
+        font-weight: 600;
+        border: none;
+        cursor: pointer;
+    }
+</style>
+
+@code {
+    private bool isLoading = false;
+    private string errorMessage = "";
+    private string currentLang = "pl-PL";
+
+    // Obsługa uczelni i stanu serwera
+    private Portal_Studenta.Services.UniversityInfo currentUni = new();
+    private Portal_Studenta.Services.ServerStatus serverStatus = Portal_Studenta.Services.ServerStatus.Checking;
+    private long serverPingMs = 0;
+    private string serverStatusMessage = "";
+    private bool isCheckingServer = false;
+    private bool isUniModalOpen = false;
+    private string searchTerm = "";
+
+    private bool IsEn => currentLang == "en-US";
+
+    private IEnumerable<Portal_Studenta.Services.UniversityInfo> FilteredUniversities
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(searchTerm))
+                return Portal_Studenta.Services.UniversityService.AvailableUniversities;
+
+            string query = searchTerm.Trim();
+            return Portal_Studenta.Services.UniversityService.AvailableUniversities
+                .Where(u => u.FullName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            u.ShortName.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            u.Code.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                            u.Cities.Contains(query, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        currentLang = Preferences.Default.Get("app_lang", "pl-PL");
+        currentUni = UniversityService.GetSelectedUniversity();
+
+        if (await AuthService.IsAuthenticatedAsync())
+        {
+            isCheckingServer = true;
+            StateHasChanged();
+            bool isActive = await AuthService.ValidateTokenAsync();
+            isCheckingServer = false;
+
+            if (isActive)
+            {
+                Navigation.NavigateTo("/");
+                return;
+            }
+            StateHasChanged();
+        }
+
+        // Asynchroniczny probe dostępności serwerów USOS
+        _ = CheckServerHealthAsync(currentUni);
+    }
+
+    private async Task CheckServerHealthAsync(Portal_Studenta.Services.UniversityInfo uni)
+    {
+        if (isCheckingServer) return;
+
+        isCheckingServer = true;
+        serverStatus = Portal_Studenta.Services.ServerStatus.Checking;
+        StateHasChanged();
+
+        var (status, ping, msg) = await UniversityService.CheckServerHealthAsync(uni);
+        serverStatus = status;
+        serverPingMs = ping;
+        serverStatusMessage = msg;
+        isCheckingServer = false;
+
+        StateHasChanged();
+    }
+
+    private string GetStatusClass()
+    {
+        return serverStatus switch
+        {
+            Portal_Studenta.Services.ServerStatus.Online => "online",
+            Portal_Studenta.Services.ServerStatus.Checking => "checking",
+            _ => "offline"
+        };
+    }
+
+    private string GetServerTooltip()
+    {
+        return serverStatus switch
+        {
+            Portal_Studenta.Services.ServerStatus.Online => IsEn 
+                ? $"USOS {currentUni.Code} is online ({serverPingMs} ms). Click to change university." 
+                : $"Serwer USOS {currentUni.Code} działa stabilnie ({serverPingMs} ms). Kliknij, aby zmienić uczelnię.",
+            Portal_Studenta.Services.ServerStatus.Checking => IsEn 
+                ? "Checking USOS connection..." 
+                : "Sprawdzanie stanu serwera USOS...",
+            _ => IsEn 
+                ? $"USOS {currentUni.Code} is offline or unreachable. Click to inspect." 
+                : $"Serwer USOS {currentUni.Code} nie odpowiada. Kliknij, aby zobaczyć szczegóły."
+        };
+    }
+
+    private void OpenUniversityModal()
+    {
+        searchTerm = "";
+        isUniModalOpen = true;
+    }
+
+    private void CloseUniversityModal()
+    {
+        isUniModalOpen = false;
+    }
+
+    private void SelectUniversity(Portal_Studenta.Services.UniversityInfo uni)
+    {
+        if (uni.Code.Equals(currentUni.Code, StringComparison.OrdinalIgnoreCase))
+        {
+            isUniModalOpen = false;
+            return;
+        }
+
+        if (!uni.IsSupported)
+        {
+            errorMessage = IsEn 
+                ? $"Full USOS API integration for {uni.FullName} is coming soon. Politechnika Śląska (POLSL) is currently active."
+                : $"Integracja z API dla {uni.FullName} jest w przygotowaniu. Obecnie w pełni zintegrowana jest Politechnika Śląska (POLSL).";
+            isUniModalOpen = false;
+            return;
+        }
+
+        currentUni = uni;
+        UniversityService.SetSelectedUniversity(uni.Code);
+        isUniModalOpen = false;
+        errorMessage = "";
+        
+        // Zbadaj stan serwera nowo wybranej uczelni
+        _ = CheckServerHealthAsync(uni);
+    }
+
+    private void ChangeLanguage(string lang)
+    {
+        if (currentLang == lang) return;
+        Preferences.Default.Set("app_lang", lang);
+        currentLang = lang;
+        Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
+    }
+
+    private async Task LoginWithUsos()
+    {
+        isLoading = true;
+        errorMessage = "";
+        StateHasChanged();
+
+        try
+        {
+            var (success, error) = await AuthService.AuthenticateAsync();
+            
+            if (success)
+            {
+                Preferences.Default.Set("session_login_at", DateTime.UtcNow.ToString("o"));
+
+                try
+                {
+                    await ProfileService.LoadProfileAsync();
+
+                    var album = ProfileService.StudentNumber;
+                    if (string.IsNullOrEmpty(album)) album = Preferences.Default.Get("user_student_number", "");
+                    var usosId = ProfileService.Id;
+                    if (string.IsNullOrEmpty(usosId)) usosId = Preferences.Default.Get("user_usos_id", "");
+
+                    if (!string.IsNullOrEmpty(album) || !string.IsNullOrEmpty(usosId))
+                    {
+                        await FirebaseService.ClearUserAccountDeletedAsync(album, usosId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Login] Błąd inicjalizacji profilu po zalogowaniu: {ex.Message}");
+                }
+
+                Navigation.NavigateTo("/");
+            }
+            else
+            {
+                errorMessage = string.IsNullOrEmpty(error) 
+                    ? (IsEn ? "An unexpected login error occurred. Please try again." : "Wystąpił nieoczekiwany błąd logowania. Spróbuj ponownie.") 
+                    : error;
+                isLoading = false;
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+}

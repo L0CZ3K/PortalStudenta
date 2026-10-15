@@ -1,0 +1,156 @@
+{
+  "rules": {
+    "users": {
+      "$albumNumber": {
+        ".read": true,
+        ".write": true,
+        "membership": {
+          ".validate": "newData.hasChildren(['GroupCode', 'Role', 'LastUpdated'])",
+          "GroupCode": {
+            ".validate": "newData.isString() && newData.val().length <= 32"
+          },
+          "Role": {
+            ".validate": "newData.isString() && (newData.val() == 'Student' || newData.val() == 'Starosta' || newData.val() == 'Admin')"
+          },
+          "LastUpdated": {
+            ".validate": "newData.isString()"
+          }
+        },
+        "personal_events": {
+          "$eventId": {
+            ".validate": "newData.hasChildren(['Uid', 'Title', 'Start', 'End'])",
+            "Uid": {
+              ".validate": "newData.isString() && newData.val().length <= 100"
+            },
+            "Title": {
+              ".validate": "newData.isString() && newData.val().length <= 250"
+            },
+            "Place": {
+              ".validate": "newData.isString() && newData.val().length <= 250"
+            },
+            "Desc": {
+              ".validate": "newData.isString() && newData.val().length <= 2000"
+            }
+          }
+        },
+        "modifications": {
+          "$lessonKey": {
+            ".validate": "newData.hasChildren(['LessonKey', 'Title'])",
+            "LessonKey": {
+              ".validate": "newData.isString() && newData.val().length <= 150"
+            },
+            "Title": {
+              ".validate": "newData.isString() && newData.val().length <= 250"
+            }
+          }
+        },
+        "attendances": {
+          "$courseKey": {
+            ".validate": "newData.isBoolean()"
+          }
+        }
+      }
+    },
+    "groups": {
+      ".indexOn": ["OwnerId"],
+      "$groupCode": {
+        ".read": true,
+        ".write": "!data.exists() || data.child('OwnerId').exists()",
+        ".validate": "$groupCode.length >= 3 && $groupCode.length <= 32",
+        "OwnerId": {
+          ".validate": "newData.isString() && newData.val().length <= 50"
+        },
+        "RedirectTo": {
+          ".read": true,
+          ".write": true,
+          ".validate": "newData.isString() && newData.val().length <= 32"
+        },
+        "events": {
+          "$eventId": {
+            ".read": true,
+            ".write": true,
+            ".validate": "newData.hasChildren(['Uid', 'Title', 'Start', 'End'])",
+            "Uid": {
+              ".validate": "newData.isString() && newData.val().length <= 100"
+            },
+            "Title": {
+              ".validate": "newData.isString() && newData.val().length <= 250"
+            },
+            "Place": {
+              ".validate": "newData.isString() && newData.val().length <= 250"
+            },
+            "Desc": {
+              ".validate": "newData.isString() && newData.val().length <= 2000"
+            }
+          }
+        },
+        "announcements": {
+          "$announcementId": {
+            ".read": true,
+            ".write": true,
+            ".validate": "newData.hasChildren(['Uid', 'Title'])",
+            "Uid": {
+              ".validate": "newData.isString() && newData.val().length <= 100"
+            },
+            "Title": {
+              ".validate": "newData.isString() && newData.val().length <= 250"
+            },
+            "ShortContent": {
+              ".validate": "newData.isString() && newData.val().length <= 500"
+            },
+            "Content": {
+              ".validate": "newData.isString() && newData.val().length <= 5000"
+            }
+          }
+        },
+        "modifications": {
+          "$lessonKey": {
+            ".read": true,
+            ".write": true,
+            ".validate": "newData.hasChildren(['LessonKey', 'Title'])",
+            "LessonKey": {
+              ".validate": "newData.isString() && newData.val().length <= 150"
+            },
+            "Title": {
+              ".validate": "newData.isString() && newData.val().length <= 250"
+            }
+          }
+        },
+        "polls": {
+          "$pollId": {
+            ".read": true,
+            ".write": true,
+            ".validate": "newData.hasChildren(['Id', 'Question', 'Options'])",
+            "Question": {
+              ".validate": "newData.isString() && newData.val().length <= 300"
+            },
+            "IsClosed": {
+              ".validate": "newData.isBoolean()"
+            },
+            "Votes": {
+              "$albumNumber": {
+                ".write": "root.child('groups').child($groupCode).child('polls').child($pollId).child('IsClosed').val() !== true",
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 20"
+              }
+            }
+          }
+        }
+      }
+    },
+    "deleted_accounts": {
+      ".indexOn": ["DeletedAt"],
+      "$albumNumber": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['Album'])",
+        "Album": {
+          ".validate": "newData.isString() && newData.val().length <= 50"
+        }
+      }
+    },
+    "system_announcements": {
+      ".read": true,
+      ".write": false
+    }
+  }
+}

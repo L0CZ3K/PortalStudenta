@@ -1,0 +1,1215 @@
+@page "/profile"
+@using Portal_Studenta.Services
+@inject UsosAuthService UsosAuthService
+@inject ProfileService ProfileService
+@inject ScheduleService ScheduleService
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject AppState AppState
+@inject FirebaseService FirebaseService
+@inject UniversityService UniversityService
+@inject NotificationService NotificationService
+@inject CalendarExportService CalendarExportService
+@inject UsosApiService UsosApiService
+@implements IDisposable
+
+<style>
+    .profile-container {
+        max-width: 680px;
+        margin: 0 auto;
+        color: var(--text-main);
+    }
+
+    .profile-hero {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        margin-bottom: 26px;
+        padding: 4px 6px;
+    }
+
+    .profile-avatar {
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--primary-color), #60a5fa);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        color: white;
+        font-size: 2.2rem;
+        font-weight: 700;
+        box-shadow: 0 4px 14px var(--primary-glow);
+        flex-shrink: 0;
+    }
+
+    .profile-hero-meta {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .profile-name {
+        margin: 0;
+        font-size: 1.55rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        color: var(--text-main);
+    }
+
+    .profile-badges-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .profile-pill {
+        font-size: 0.76rem;
+        font-weight: 600;
+        padding: 3px 9px;
+        border-radius: 6px;
+        background: var(--input-bg);
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+    }
+
+    .profile-pill.pill-uni {
+        background: rgba(10, 132, 255, 0.14);
+        color: var(--primary-color);
+        border-color: rgba(10, 132, 255, 0.25);
+    }
+
+    .inset-label {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .inset-title {
+        font-size: 0.95rem;
+        font-weight: 600;
+        color: var(--text-main);
+    }
+
+    .inset-subtext {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+    }
+
+    .uni-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 14px;
+        border-radius: 8px;
+        background: rgba(10, 132, 255, 0.12);
+        border: 1px solid rgba(10, 132, 255, 0.25);
+        color: var(--primary-color);
+        font-weight: 600;
+        font-size: 0.88rem;
+    }
+</style>
+
+<div class="profile-container">
+    <div class="profile-hero">
+        <div class="profile-avatar">
+            @(string.IsNullOrEmpty(ProfileService.FirstName) ? "U" : ProfileService.FirstName.Substring(0, 1))
+        </div>
+        <div class="profile-hero-meta">
+            <h1 class="profile-name">@(string.IsNullOrEmpty(ProfileService.FirstName) ? "Student" : $"{ProfileService.FirstName} {ProfileService.LastName}")</h1>
+            <div class="profile-badges-row">
+                <span class="profile-pill">@(CurrentLang == "en-US" ? "ID" : "Album"): @(string.IsNullOrEmpty(ProfileService.StudentNumber) ? (CurrentLang == "en-US" ? "No data" : "Brak danych") : ProfileService.StudentNumber)</span>
+                <span class="profile-pill pill-uni">@SelectedUni.ShortName</span>
+                @if (AppState.IsStarosta)
+                {
+                    <span class="profile-pill" style="background: rgba(249, 115, 22, 0.15); color: var(--color-starosta); border-color: rgba(249, 115, 22, 0.35); font-weight: 700;">
+                        👑 @(CurrentLang == "en-US" ? "Starosta" : "Starosta")
+                    </span>
+                }
+                else if (AppState.IsAdmin)
+                {
+                    <span class="profile-pill" style="background: rgba(255, 69, 58, 0.15); color: var(--danger-color); border-color: rgba(255, 69, 58, 0.35); font-weight: 700;">
+                        🛡️ @(CurrentLang == "en-US" ? "Admin" : "Administrator")
+                    </span>
+                }
+                else
+                {
+                    <span class="profile-pill">
+                        🎓 @(CurrentLang == "en-US" ? "Student" : "Student")
+                    </span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Grupa 1: Wygląd i Personalizacja -->
+    <div class="inset-group">
+        <div class="inset-header">@(CurrentLang == "en-US" ? "Personalization & Theme" : "Personalizacja & Motyw")</div>
+        
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title">@(CurrentLang == "en-US" ? "Light Mode" : "Tryb jasny (Light mode)")</span>
+                <span class="inset-subtext">@(CurrentLang == "en-US" ? "Switches color palette to light background" : "Zmienia paletę barw na jasne tło")</span>
+            </div>
+            <label class="switch">
+                <input type="checkbox" checked="@IsLightMode" @onchange="ToggleThemeMode" />
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        <div class="inset-row" style="flex-direction: column; align-items: flex-start; gap: 10px;">
+            <div class="inset-label">
+                <span class="inset-title">@(CurrentLang == "en-US" ? "Accent Color" : "Kolor akcentu")</span>
+                <span class="inset-subtext">@(CurrentLang == "en-US" ? "Accent for buttons, links and highlights" : "Akcent dla przycisków, linków i kafelków")</span>
+            </div>
+            <div class="color-swatches">
+                <button type="button" class="color-swatch-btn @(CurrentTheme == "Default" ? "active" : "")" style="background-color: #0A84FF; --swatch-color: #0A84FF;" title="Classic Blue" @onclick='() => ChangeTheme("Default", "#0A84FF")'>
+                    @if (CurrentTheme == "Default") {
+                        <svg class="color-swatch-check" viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                    }
+                </button>
+                <button type="button" class="color-swatch-btn @(CurrentTheme == "Emerald" ? "active" : "")" style="background-color: #30D158; --swatch-color: #30D158;" title="Emerald" @onclick='() => ChangeTheme("Emerald", "#30D158")'>
+                    @if (CurrentTheme == "Emerald") {
+                        <svg class="color-swatch-check" viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                    }
+                </button>
+                <button type="button" class="color-swatch-btn @(CurrentTheme == "Purple" ? "active" : "")" style="background-color: #BF5AF2; --swatch-color: #BF5AF2;" title="Royal Purple" @onclick='() => ChangeTheme("Purple", "#BF5AF2")'>
+                    @if (CurrentTheme == "Purple") {
+                        <svg class="color-swatch-check" viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                    }
+                </button>
+                <button type="button" class="color-swatch-btn @(CurrentTheme == "Sunset" ? "active" : "")" style="background-color: #FF9F0A; --swatch-color: #FF9F0A;" title="Sunset Orange" @onclick='() => ChangeTheme("Sunset", "#FF9F0A")'>
+                    @if (CurrentTheme == "Sunset") {
+                        <svg class="color-swatch-check" viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                    }
+                </button>
+                <button type="button" class="color-swatch-btn @(CurrentTheme == "Rose" ? "active" : "")" style="background-color: #FF375F; --swatch-color: #FF375F;" title="Crimson Rose" @onclick='() => ChangeTheme("Rose", "#FF375F")'>
+                    @if (CurrentTheme == "Rose") {
+                        <svg class="color-swatch-check" viewBox="0 0 24 24" fill="none"><polyline points="20 6 9 17 4 12"/></svg>
+                    }
+                </button>
+            </div>
+        </div>
+
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title">@(CurrentLang == "en-US" ? "Interface Language" : "Język interfejsu")</span>
+                <span class="inset-subtext">@(CurrentLang == "en-US" ? "Choose display language" : "Wybierz język napisów w aplikacji")</span>
+            </div>
+            <select class="form-control" style="width: auto; min-width: 130px; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 7px 12px; border-radius: 8px; font-weight: 600;" @onchange="ChangeLanguage">
+                <option value="pl-PL" selected="@(CurrentLang == "pl-PL")">Polski</option>
+                <option value="en-US" selected="@(CurrentLang == "en-US")">English</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Grupa 2: Uczelnia -->
+    <div class="inset-group">
+        <div class="inset-header">@(CurrentLang == "en-US" ? "University & USOS Account" : "Uczelnia & Konto USOS")</div>
+        
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title">@SelectedUni.FullName</span>
+                <span class="inset-subtext">@(SelectedUni.IsSupported ? (CurrentLang == "en-US" ? "Active USOS API integration" : "Aktywna integracja USOS API") : (CurrentLang == "en-US" ? "Support in preparation" : "Wsparcie w przygotowaniu")) • @SelectedUni.Cities</span>
+            </div>
+            <button class="uni-chip" style="cursor: pointer; border: 1px solid rgba(10, 132, 255, 0.3); background: rgba(10, 132, 255, 0.12);" @onclick="OpenUniModal">
+                <span class="status-dot" style="background-color: @(SelectedUni.IsSupported ? "#30D158" : "#FF9F0A");"></span>
+                @SelectedUni.ShortName ▾
+            </button>
+        </div>
+    </div>
+
+    <!-- Grupa 3: Grupa Studencka -->
+    <div class="inset-group">
+        <div class="inset-header">@(CurrentLang == "en-US" ? "Group & Schedule Sharing" : "Grupa i Współdzielenie Planu")</div>
+        
+        @if (!string.IsNullOrEmpty(AppState.GroupCode))
+        {
+            <div class="inset-row" style="flex-direction: column; align-items: flex-start; gap: 12px;">
+                <div class="inset-label">
+                    <span class="inset-title" style="color: #30D158;">@(CurrentLang == "en-US" ? $"Group {AppState.GroupCode}" : $"Grupa {AppState.GroupCode}")</span>
+                    <span class="inset-subtext">
+                        @(AppState.IsStarosta 
+                            ? (CurrentLang == "en-US" ? "You are Starosta of this group." : "Jesteś Starostą tej grupy.") 
+                            : (AppState.IsAdmin 
+                                ? (CurrentLang == "en-US" ? "You are Administrator of this group." : "Jesteś Administratorem tej grupy.") 
+                                : (CurrentLang == "en-US" ? "You are a member. You receive updates from Starosta." : "Jesteś członkiem grupy. Otrzymujesz aktualizacje od Starosty.")))
+                    </span>
+                </div>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    @if (AppState.IsStarosta)
+                    {
+                        <button class="btn btn-warning" style="font-weight: 600; padding: 7px 14px; border-radius: 8px; font-size: 0.85rem;" @onclick="RequestResignStarosta">
+                            @(CurrentLang == "en-US" ? "👑 Step down as Starosta" : "👑 Oddaj rolę Starosty")
+                        </button>
+                    }
+                    <button class="btn btn-danger" style="font-weight: 600; padding: 7px 14px; border-radius: 8px; font-size: 0.85rem;" @onclick="RequestLeaveGroup">
+                        @(CurrentLang == "en-US" ? "Leave Group" : "Opuść Grupę")
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="inset-row" style="flex-direction: column; align-items: stretch; gap: 12px;">
+                <div class="inset-label">
+                    <span class="inset-title">@(CurrentLang == "en-US" ? "Join Starosta Group" : "Dołącz do grupy Starosty")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Receive cancelled classes and room changes instantly" : "Otrzymuj natychmiast odwołane zajęcia i zmiany sal")</span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" class="form-control" style="flex: 1; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 12px; border-radius: 8px;" placeholder='@(CurrentLang == "en-US" ? "Enter 6-digit code..." : "Wpisz 6-znakowy kod...")' @bind="inputGroupCode" />
+                    <button class="btn" style="background-color: var(--primary-color); color: white; font-weight: 600; border-radius: 8px; padding: 8px 16px;" @onclick="JoinGroup">
+                        @(CurrentLang == "en-US" ? "Join" : "Dołącz")
+                    </button>
+                </div>
+            </div>
+
+            <div class="inset-row" style="flex-direction: column; align-items: stretch; gap: 10px;">
+                <div class="inset-label">
+                    <span class="inset-title">@(CurrentLang == "en-US" ? "Are you a Starosta?" : "Jesteś Starostą?")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Create a group for your year to edit and share schedule" : "Utwórz grupę dla swojego rocznika, aby edytować i udostępniać plan")</span>
+                </div>
+                <button class="btn" style="background-color: var(--color-starosta); color: white; font-weight: 600; padding: 10px; border-radius: 8px;" @onclick="CreateGroup">
+                    @(CurrentLang == "en-US" ? "Become Starosta" : "Zostań Starostą")
+                </button>
+            </div>
+        }
+
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title">
+                    @(AppState.IsStarosta ? "👑 Uprawnienia: Starosta" : (AppState.IsAdmin ? "🛡️ Uprawnienia: Administrator" : "🎓 Rola: Student"))
+                </span>
+                <span class="inset-subtext">
+                    @(AppState.IsStarosta 
+                        ? (CurrentLang == "en-US" ? "You manage schedule, board, admins and room code." : "Zarządzasz planem, ogłoszeniami, administratorami oraz kodem grupy.") 
+                        : (AppState.IsAdmin 
+                            ? (CurrentLang == "en-US" ? "You can reschedule, cancel classes and post announcements." : "Możesz odwoływać i przesuwać zajęcia oraz publikować ogłoszenia.") 
+                            : (CurrentLang == "en-US" ? "View schedule and post personal events and notes." : "Przeglądasz plan oraz dodajesz własne prywatne wydarzenia i notatki.")))
+                </span>
+            </div>
+            <span class="profile-pill" style="@(AppState.IsStarosta ? "background: rgba(249, 115, 22, 0.15); color: var(--color-starosta); border-color: rgba(249, 115, 22, 0.35);" : (AppState.IsAdmin ? "background: rgba(255, 69, 58, 0.15); color: var(--danger-color); border-color: rgba(255, 69, 58, 0.35);" : "")) font-weight: 700;">
+                @(AppState.IsStarosta ? "Starosta" : (AppState.IsAdmin ? "Admin" : "Student"))
+            </span>
+        </div>
+    </div>
+
+    <!-- Grupa: Powiadomienia o Zmianach -->
+    <div class="inset-group">
+        <div class="inset-header">@(CurrentLang == "en-US" ? "Schedule Change Alerts" : "Powiadomienia o Zmianach")</div>
+
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title">@(CurrentLang == "en-US" ? "System alerts" : "Włącz powiadomienia")</span>
+                <span class="inset-subtext">@(CurrentLang == "en-US" ? "Alerts about schedule changes and urgent notices" : "Alerty o odwołaniach, zmianach sal i pilnych ogłoszeniach")</span>
+            </div>
+            <label class="switch">
+                <input type="checkbox" checked="@NotificationService.IsEnabled" @onchange="ToggleNotifications" />
+                <span class="slider"></span>
+            </label>
+        </div>
+
+        @if (NotificationService.IsEnabled)
+        {
+            <div class="inset-row">
+                <div class="inset-label">
+                    <span class="inset-title">⏰ @(CurrentLang == "en-US" ? "Upcoming class alerts" : "Przypomnienia przed zajęciami")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Alarm before the start of each class" : "Powiadomienie przed rozpoczęciem każdych zajęć")</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <select class="form-control" style="width: auto; min-width: 90px; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 5px 8px; border-radius: 8px; font-size: 0.82rem; font-weight: 600;"
+                            value="@NotificationService.ReminderMinutes"
+                            @onchange='(e) => { if (int.TryParse(e.Value?.ToString(), out var m)) { NotificationService.ReminderMinutes = m; } }'
+                            disabled="@(!NotificationService.NotifyUpcomingClasses)">
+                        <option value="5">5 min</option>
+                        <option value="10">10 min</option>
+                        <option value="15">15 min</option>
+                        <option value="30">30 min</option>
+                        <option value="60">60 min</option>
+                    </select>
+                    <label class="switch">
+                        <input type="checkbox" checked="@NotificationService.NotifyUpcomingClasses" @onchange='(e) => { NotificationService.NotifyUpcomingClasses = (bool)e.Value!; }' />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="inset-row">
+                <div class="inset-label">
+                    <span class="inset-title">🚨 @(CurrentLang == "en-US" ? "Class cancellations" : "Odwołania zajęć")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Notify when a class is canceled" : "Gdy starosta lub wydział odwoła zajęcia")</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" checked="@NotificationService.NotifyCancellations" @onchange='(e) => { NotificationService.NotifyCancellations = (bool)e.Value!; }' />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="inset-row">
+                <div class="inset-label">
+                    <span class="inset-title">📍 @(CurrentLang == "en-US" ? "Classroom changes" : "Zmiany sal")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Notify when classroom is updated" : "Gdy zajęcia zostaną przeniesione do innej sali")</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" checked="@NotificationService.NotifyRoomChanges" @onchange='(e) => { NotificationService.NotifyRoomChanges = (bool)e.Value!; }' />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="inset-row">
+                <div class="inset-label">
+                    <span class="inset-title">🕒 @(CurrentLang == "en-US" ? "Rescheduled hours" : "Przesunięcia godzin")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Notify when class time or date changes" : "Gdy zmienią się godziny lub data zajęć")</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" checked="@NotificationService.NotifyReschedules" @onchange='(e) => { NotificationService.NotifyReschedules = (bool)e.Value!; }' />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="inset-row">
+                <div class="inset-label">
+                    <span class="inset-title">📢 @(CurrentLang == "en-US" ? "Starosta & cohort notices" : "Ogłoszenia Starosty i rocznika")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Urgent notices from your cohort representative" : "Ważne komunikaty od starosty Twojej grupy")</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" checked="@NotificationService.NotifyStarostaAnnouncements" @onchange='(e) => { NotificationService.NotifyStarostaAnnouncements = (bool)e.Value!; }' />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="inset-row">
+                <div class="inset-label">
+                    <span class="inset-title">🗳️ @(CurrentLang == "en-US" ? "Group polls & voting" : "Ankiety i głosowania grupy")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Notify when a new poll is published" : "Powiadomienia o nowych ankietach i głosowaniach w grupie")</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" checked="@NotificationService.NotifyPolls" @onchange='(e) => { NotificationService.NotifyPolls = (bool)e.Value!; }' />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="inset-row">
+                <div class="inset-label">
+                    <span class="inset-title">🛠️ @(CurrentLang == "en-US" ? "Developer & System notices" : "Informacje od twórców (Dev / System)")</span>
+                    <span class="inset-subtext">@(CurrentLang == "en-US" ? "Notify when devs publish news or system updates" : "Powiadomienia o nowych aktualizacjach i komunikatach od twórców")</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" checked="@NotificationService.NotifyDevAnnouncements" @onchange='(e) => { NotificationService.NotifyDevAnnouncements = (bool)e.Value!; }' />
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="inset-row" style="justify-content: flex-end;">
+                <button class="btn btn-secondary" style="font-weight: 600; font-size: 0.85rem; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border-color);" @onclick="SendTestNotification">
+                    🔔 @(CurrentLang == "en-US" ? "Send test notification" : "Wyślij testowe powiadomienie")
+                </button>
+            </div>
+        }
+    </div>
+
+    <!-- Grupa: Plan Zajęć & Kalendarz Akademicki -->
+    <div class="inset-group">
+        <div class="inset-header">@(CurrentLang == "en-US" ? "Schedule & Academic Weeks" : "Plan Zajęć & Tydzień Parzysty / Nieparzysty")</div>
+        
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title">@(CurrentLang == "en-US" ? "Week Parity Mode" : "Tryb parzystości tygodnia")</span>
+                <span class="inset-subtext">
+                    @(AppState.WeekParity switch {
+                        WeekParityMode.Auto => (CurrentLang == "en-US" ? "Automatic (from USOS / academic calendar)" : "Automatycznie (zgodnie z USOS i kalendarzem)"),
+                        WeekParityMode.AlwaysEven => (CurrentLang == "en-US" ? "Timetable always treated as Even Week" : "Zawsze wyświetlaj jako tydzień parzysty"),
+                        WeekParityMode.AlwaysOdd => (CurrentLang == "en-US" ? "Timetable always treated as Odd Week" : "Zawsze wyświetlaj jako tydzień nieparzysty"),
+                        WeekParityMode.Inverted => (CurrentLang == "en-US" ? "Inverted parity (Even ↔ Odd swapped)" : "Odwrócona numeracja (zamień parzysty z nieparzystym)"),
+                        _ => ""
+                    })
+                </span>
+            </div>
+            <select class="form-control" style="width: auto; min-width: 175px; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 7px 12px; border-radius: 8px; font-weight: 600;" value="@((int)AppState.WeekParity)" @onchange="OnWeekParityChanged">
+                <option value="0">@(CurrentLang == "en-US" ? "⚡ Auto (USOS / ISO)" : "⚡ Auto (USOS / Kalendarz)")</option>
+                <option value="1">@(CurrentLang == "en-US" ? "🔵 Always Even" : "🔵 Zawsze parzysty")</option>
+                <option value="2">@(CurrentLang == "en-US" ? "🟠 Always Odd" : "🟠 Zawsze nieparzysty")</option>
+                <option value="3">@(CurrentLang == "en-US" ? "🔄 Invert Parity" : "🔄 Odwróć parzystość")</option>
+            </select>
+        </div>
+
+        <div class="inset-row" style="flex-direction: column; align-items: flex-start; gap: 10px;">
+            <div class="inset-label">
+                <span class="inset-title">@(CurrentLang == "en-US" ? "Academic Term & USOS Info" : "Pobierz info z USOS (Semestr & Kalendarz)")</span>
+                <span class="inset-subtext">
+                    @if (!string.IsNullOrEmpty(AppState.AcademicTermName))
+                    {
+                        <span>@(CurrentLang == "en-US" ? "Active term: " : "Aktywny semestr: ")<strong>@AppState.AcademicTermName</strong>@(string.IsNullOrEmpty(AppState.AcademicTermStart) ? "" : $" (początek: {AppState.AcademicTermStart})")</span>
+                    }
+                    else
+                    {
+                        <span>@(CurrentLang == "en-US" ? "Pulls semester start date and academic calendar from USOS API." : "Pobiera datę rozpoczęcia semestru i kalendarz akademicki z USOS API.")</span>
+                    }
+                </span>
+            </div>
+            <button class="btn btn-secondary" style="font-weight: 600; font-size: 0.85rem; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border-color); display: inline-flex; align-items: center; gap: 6px;" @onclick="SyncWeekInfoFromUsos" disabled="@isSyncingTerm">
+                @if (isSyncingTerm)
+                {
+                    <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px;"></span>
+                    <span>@(CurrentLang == "en-US" ? "Syncing..." : "Pobieranie z USOS...")</span>
+                }
+                else
+                {
+                    <span>🔄</span>
+                    <span>@(CurrentLang == "en-US" ? "Sync term from USOS" : "Pobierz info z USOS")</span>
+                }
+            </button>
+        </div>
+    </div>
+
+    <!-- Grupa: Kalendarz i Eksport -->
+    <div class="inset-group">
+        <div class="inset-header">@(CurrentLang == "en-US" ? "Calendar & Export" : "Kalendarz i Eksport")</div>
+        <div class="inset-row" style="flex-direction: column; align-items: flex-start; gap: 12px;">
+            <div class="inset-label">
+                <span class="inset-title">📅 @(CurrentLang == "en-US" ? "System Calendar (.ics)" : "Kalendarz systemowy (.ics)")</span>
+                <span class="inset-subtext">@(CurrentLang == "en-US" ? "Export your full timetable directly to your device calendar or share as an .ics file" : "Dodaj cały semestr z USOS do kalendarza w telefonie lub udostępnij plik .ics")</span>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; width: 100%;">
+                <button class="btn btn-primary" style="flex: 1; padding: 10px 14px; border-radius: 9px; font-weight: 600; font-size: 0.88rem; display: flex; align-items: center; justify-content: center; gap: 6px;" @onclick="ExportAllToCalendar">
+                    <span>🗓️</span>
+                    <span>@(CurrentLang == "en-US" ? "Add to Calendar" : "Dodaj do Kalendarza")</span>
+                </button>
+                <button class="btn btn-secondary" style="padding: 10px 14px; border-radius: 9px; font-weight: 600; font-size: 0.88rem; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main);" @onclick="ShareCalendarIcs">
+                    <span>📤</span>
+                    <span>@(CurrentLang == "en-US" ? "Share .ics" : "Udostępnij .ics")</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Grupa 4: Bezpieczeństwo i Sesja -->
+    <div class="inset-group">
+        <div class="inset-header">@(CurrentLang == "en-US" ? "Security & Session" : "Bezpieczeństwo & Sesja")</div>
+        
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title">@(CurrentLang == "en-US" ? "Sign out from device" : "Wyloguj z urządzenia")</span>
+                <span class="inset-subtext">@(CurrentLang == "en-US" ? "Removes saved session (USOS tokens)" : "Usuwa zapisaną sesję (tokeny USOS)")</span>
+            </div>
+            <button class="btn btn-secondary" style="font-weight: 600; font-size: 0.85rem; padding: 7px 14px; border-radius: 8px; border: 1px solid var(--border-color);" @onclick="Logout">
+                @(CurrentLang == "en-US" ? "Sign Out" : "Wyloguj")
+            </button>
+        </div>
+
+        <div class="inset-row">
+            <div class="inset-label">
+                <span class="inset-title" style="color: var(--danger-color);">@(CurrentLang == "en-US" ? "Delete account and data" : "Usuń konto i dane")</span>
+                <span class="inset-subtext">@(CurrentLang == "en-US" ? "Permanently removes your data from server and app" : "Bezpowrotnie kasuje Twoje dane z serwera i aplikacji")</span>
+            </div>
+            <button class="btn btn-danger" style="font-weight: 600; font-size: 0.85rem; padding: 7px 14px; border-radius: 8px;" @onclick="DeleteAccount">
+                @(CurrentLang == "en-US" ? "Delete Account" : "Usuń Konto")
+            </button>
+        </div>
+    </div>
+</div>
+
+@* --- MODAL: ZMIANA UCZELNI --- *@
+@if (IsUniModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CloseUniModal">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseUniModal">&times;</button>
+            
+            <h2 class="modal-title">
+                @(CurrentLang == "en-US" ? "🎓 Select University" : "🎓 Wybór uczelni")
+            </h2>
+            <p style="color: var(--text-muted); font-size: 0.88rem; margin-top: -6px; margin-bottom: 16px;">
+                @(CurrentLang == "en-US" ? "Choose your active university to connect with USOS." : "Wybierz swoją uczelnię, aby połączyć się z USOS.")
+            </p>
+
+            <!-- Pasek wyszukiwania uczelni -->
+            <div style="position: relative; margin-bottom: 14px;">
+                <input type="text" class="form-control" 
+                       style="background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 14px 10px 38px; border-radius: 10px; width: 100%; font-size: 0.92rem;"
+                       placeholder='@(CurrentLang == "en-US" ? "Search university or city..." : "Szukaj uczelni lub miasta...")'
+                       @bind="uniSearchQuery"
+                       @bind:event="oninput" />
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                     style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--text-muted); pointer-events: none;">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; max-height: 320px; overflow-y: auto;">
+                @if (!FilteredUnis.Any())
+                {
+                    <div style="text-align: center; padding: 28px 16px; color: var(--text-muted); font-size: 0.9rem;">
+                        @(CurrentLang == "en-US" ? "No universities found matching your search." : "Nie znaleziono uczelni pasującej do wyszukiwania.")
+                    </div>
+                }
+                else
+                {
+                    @foreach (var uni in FilteredUnis)
+                    {
+                        var isSelected = SelectedUni.Code.Equals(uni.Code, StringComparison.OrdinalIgnoreCase);
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; background: var(--input-bg); border: 1px solid @(isSelected ? "var(--primary-color)" : "var(--border-color)"); cursor: pointer; transition: all 0.15s ease;"
+                             @onclick="() => SwitchUniversity(uni)">
+                            <div style="display: flex; flex-direction: column; gap: 2px;">
+                                <span style="font-weight: 600; color: var(--text-main); font-size: 0.95rem;">@uni.FullName</span>
+                                <span style="font-size: 0.78rem; color: var(--text-muted);">@uni.Cities</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                @if (isSelected)
+                                {
+                                    <span class="profile-pill pill-uni">✓ @(CurrentLang == "en-US" ? "Active" : "Aktywna")</span>
+                                }
+                                else if (uni.IsSupported)
+                                {
+                                    <span class="profile-pill">@uni.ShortName</span>
+                                }
+                                else
+                                {
+                                    <span class="profile-pill" style="opacity: 0.6;">@(CurrentLang == "en-US" ? "Beta" : "Wkrótce")</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+
+            <div class="modal-actions-row">
+                <button class="btn btn-secondary" style="width: 100%;" @onclick="CloseUniModal">
+                    @(CurrentLang == "en-US" ? "Close" : "Zamknij")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@* --- MODAL: ODDAWANIE STAROSTWA --- *@
+@if (IsResignStarostaModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CancelResignStarosta">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CancelResignStarosta">&times;</button>
+            
+            <h2 class="modal-title" style="color: var(--warning-color);">
+                @(CurrentLang == "en-US" ? "👑 Transfer Starosta Role" : "👑 Oddanie roli Starosty")
+            </h2>
+            <p style="color: var(--text-main); margin-bottom: 14px; line-height: 1.5; font-size: 0.92rem;">
+                @(CurrentLang == "en-US" 
+                    ? $"Transfer Starosta privileges for group {AppState.GroupCode} to another student. You will remain in the group as a regular student, but will lose access to schedule and board editing." 
+                    : $"Przekaż uprawnienia Starosty w grupie {AppState.GroupCode} innemu studentowi. Pozostaniesz w tej grupie jako zwykły student, lecz stracisz dostęp do edycji planu i ogłoszeń.")
+            </p>
+
+            @if (!string.IsNullOrEmpty(ProfileService.StudentNumber))
+            {
+                <div style="background: rgba(255, 159, 10, 0.1); border: 1px solid rgba(255, 159, 10, 0.25); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; font-size: 0.88rem; color: var(--text-main); display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-muted);">@(CurrentLang == "en-US" ? "Your student ID / album number:" : "Twój numer albumu:")</span>
+                    <strong style="color: var(--warning-color); font-size: 0.95rem;">@ProfileService.StudentNumber</strong>
+                </div>
+            }
+
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 0.88rem; font-weight: 600; color: var(--text-main); margin-bottom: 6px;">
+                    @(CurrentLang == "en-US" ? "New Starosta Student ID / Album number:" : "Numer albumu nowego Starosty:")
+                </label>
+                <input type="text" class="form-control"
+                       style="background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 14px; border-radius: 10px; width: 100%; font-size: 0.95rem;"
+                       placeholder='@(CurrentLang == "en-US" ? "e.g. 123456" : "np. 123456")'
+                       @bind="targetStarostaAlbum" />
+                <span style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-top: 6px; line-height: 1.4;">
+                    @(CurrentLang == "en-US" 
+                        ? "Student with this album number will automatically become Starosta when using this group." 
+                        : "Student o tym numerze albumu po otwarciu tej grupy automatycznie uzyska uprawnienia Starosty.")
+                </span>
+            </div>
+            
+            <div class="modal-actions-row">
+                <button class="btn btn-secondary" style="flex: 1;" @onclick="CancelResignStarosta">
+                    @(CurrentLang == "en-US" ? "Cancel" : "Anuluj")
+                </button>
+                <button class="btn btn-warning" style="flex: 1; font-weight: 600;" @onclick="ConfirmResignStarosta">
+                    @(CurrentLang == "en-US" ? "Transfer Role" : "Przekaż rolę")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (IsLeaveModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CancelLeave">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CancelLeave">&times;</button>
+            
+            <h2 class="modal-title" style="color: var(--danger-color);">
+                @(CurrentLang == "en-US" ? "⚠️ Leaving Group" : "⚠️ Opuszczanie grupy")
+            </h2>
+            <p style="color: var(--text-main); margin-bottom: 20px; line-height: 1.5;">
+                @(CurrentLang == "en-US" ? "Are you sure you want to leave group" : "Czy na pewno chcesz opuścić grupę") <strong>@AppState.GroupCode</strong>?<br/><br/>
+                @(CurrentLang == "en-US" 
+                    ? "You will lose access to Starosta announcements and schedule updates." 
+                    : "Stracisz dostęp do powiadomień Starosty oraz aktualizacji planu zajęć.")
+            </p>
+            
+            <div class="modal-actions-row">
+                <button class="btn btn-secondary" style="flex: 1;" @onclick="CancelLeave">
+                    @(CurrentLang == "en-US" ? "Cancel" : "Anuluj")
+                </button>
+                <button class="btn @(CanLeaveNow ? "btn-danger" : "")" style="flex: 1; @(!CanLeaveNow ? "background-color: #6c757d; color: white; opacity: 0.6;" : "")" disabled="@(!CanLeaveNow)" @onclick="ConfirmLeave">
+                    @(CanLeaveNow 
+                        ? (CurrentLang == "en-US" ? "Leave Group" : "Opuść Grupę") 
+                        : $"{LeaveCountdown}s ({(CurrentLang == "en-US" ? "Wait" : "Czekaj")})")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public MainLayout? Layout { get; set; }
+
+    private bool IsLightMode = false;
+    private string CurrentTheme = "Default";
+    private string inputGroupCode = "";
+    private string CurrentLang = "pl-PL";
+
+    // Uczelnie
+    private UniversityInfo SelectedUni = new();
+    private List<UniversityInfo> AvailableUnis = new();
+    private bool IsUniModalOpen = false;
+    private string uniSearchQuery = "";
+    private IEnumerable<UniversityInfo> FilteredUnis => 
+        string.IsNullOrWhiteSpace(uniSearchQuery)
+            ? AvailableUnis
+            : AvailableUnis.Where(u => 
+                (u.FullName?.Contains(uniSearchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (u.ShortName?.Contains(uniSearchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (u.Code?.Contains(uniSearchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (u.Cities?.Contains(uniSearchQuery, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    // Zmienne do modali
+    private bool IsLeaveModalOpen = false;
+    private int LeaveCountdown = 5;
+    private bool CanLeaveNow = false;
+    private System.Timers.Timer? _leaveTimer;
+
+    private bool IsResignStarostaModalOpen = false;
+    private string targetStarostaAlbum = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentLang = AppState.Language;
+        AppState.OnChange += OnAppStateChanged;
+
+        SelectedUni = UniversityService.GetSelectedUniversity();
+        AvailableUnis = UniversityService.AvailableUniversities.ToList();
+
+        if (!ProfileService.IsLoaded)
+        {
+            await ProfileService.LoadProfileAsync();
+        }
+
+        await CheckGroupOwnershipAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var savedMode = await JS.InvokeAsync<string>("localStorage.getItem", "app_lightmode");
+            IsLightMode = savedMode == "true";
+
+            var savedTheme = await JS.InvokeAsync<string>("localStorage.getItem", "app_theme_name");
+            if (!string.IsNullOrEmpty(savedTheme)) CurrentTheme = savedTheme;
+            
+            CurrentLang = AppState.Language;
+            StateHasChanged();
+        }
+    }
+
+    private void OnAppStateChanged()
+    {
+        CurrentLang = AppState.Language;
+        InvokeAsync(StateHasChanged);
+    }
+    
+    private void ChangeLanguage(ChangeEventArgs e)
+    {
+        string lang = e.Value?.ToString() ?? "pl-PL";
+        CurrentLang = lang;
+        AppState.SetLanguage(lang);
+        Layout?.ShowToast(lang == "en-US" ? "Language changed to English." : "Zmieniono język na polski.", MainLayout.ToastType.Info);
+        StateHasChanged();
+    }
+
+    // --- ZARZĄDZANIE UCZELNIAMI ---
+    private void OpenUniModal()
+    {
+        uniSearchQuery = "";
+        IsUniModalOpen = true;
+    }
+
+    private void CloseUniModal()
+    {
+        uniSearchQuery = "";
+        IsUniModalOpen = false;
+    }
+
+    private void SwitchUniversity(UniversityInfo uni)
+    {
+        UniversityService.SetSelectedUniversity(uni.Code);
+        SelectedUni = uni;
+        CloseUniModal();
+        Layout?.ShowToast(CurrentLang == "en-US" ? $"Switched to {uni.ShortName}!" : $"Przełączono na {uni.ShortName}!", MainLayout.ToastType.Success);
+    }
+
+    private async Task CheckGroupOwnershipAsync()
+    {
+        string myId = ProfileService.StudentNumber;
+        if (string.IsNullOrEmpty(myId)) myId = ProfileService.Id;
+        if (string.IsNullOrEmpty(myId)) myId = Preferences.Default.Get("user_student_number", "");
+        if (string.IsNullOrEmpty(myId)) myId = Preferences.Default.Get("user_usos_id", "");
+
+        if (!string.IsNullOrEmpty(myId))
+        {
+            await FirebaseService.SyncUserSessionAsync(myId, AppState, ScheduleService);
+        }
+    }
+
+    // --- GRUPA I STAROSTA ---
+    private async Task JoinGroup()
+    {
+        if (string.IsNullOrWhiteSpace(inputGroupCode) || inputGroupCode.Length < 5)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please enter a valid group code!" : "Podaj poprawny kod grupy!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var code = inputGroupCode.ToUpper().Trim();
+        var group = await FirebaseService.GetGroupAsync(code);
+        if (group != null)
+        {
+            AppState.SetGroupCode(code);
+
+            string myId = ProfileService.StudentNumber;
+            if (string.IsNullOrEmpty(myId)) myId = ProfileService.Id;
+            if (string.IsNullOrEmpty(myId)) myId = Preferences.Default.Get("user_student_number", "");
+            if (string.IsNullOrEmpty(myId)) myId = Preferences.Default.Get("user_usos_id", "");
+
+            bool isMeOwner = !string.IsNullOrEmpty(group.OwnerId) && 
+                             !string.IsNullOrEmpty(myId) && 
+                             group.OwnerId.Trim().Equals(myId.Trim(), StringComparison.OrdinalIgnoreCase);
+
+            bool isMeStarosta = isMeOwner || (group.Starostas != null && !string.IsNullOrEmpty(myId) && group.Starostas.Any(s => s.Trim().Equals(myId.Trim(), StringComparison.OrdinalIgnoreCase)));
+            bool isMeAdmin = !isMeStarosta && (group.Admins != null && !string.IsNullOrEmpty(myId) && group.Admins.Any(a => a.Trim().Equals(myId.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+            UserRole myRole = UserRole.Student;
+            if (isMeStarosta)
+                myRole = UserRole.Starosta;
+            else if (isMeAdmin)
+                myRole = UserRole.Admin;
+
+            AppState.SetUserRole(myRole);
+
+            if (!string.IsNullOrEmpty(myId))
+            {
+                await FirebaseService.SaveUserMembershipAsync(myId, code, myRole.ToString());
+            }
+
+            inputGroupCode = "";
+
+            if (isMeStarosta)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? $"Joined group {code} as Starosta!" : $"Dołączono do grupy {code} jako Starosta!", MainLayout.ToastType.Success);
+            }
+            else if (isMeAdmin)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? $"Joined group {code} as Admin!" : $"Dołączono do grupy {code} jako Administrator!", MainLayout.ToastType.Success);
+            }
+            else
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? $"Joined group {code}!" : $"Dołączono do grupy {code}!", MainLayout.ToastType.Info);
+            }
+
+            await ScheduleService.SyncCloudEventsAsync();
+        }
+        else
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "This group does not exist!" : "Taka grupa nie istnieje!", MainLayout.ToastType.Warning);
+        }
+    }
+
+    private async Task CreateGroup()
+    {
+        try
+        {
+            if (!ProfileService.IsLoaded)
+            {
+                await ProfileService.LoadProfileAsync();
+            }
+
+            string ownerId = ProfileService.StudentNumber;
+            if (string.IsNullOrEmpty(ownerId))
+            {
+                ownerId = ProfileService.Id;
+            }
+            if (string.IsNullOrEmpty(ownerId))
+            {
+                ownerId = "STUDENT_" + new Random().Next(100000, 999999);
+            }
+
+            string newCode = "";
+            bool isCloudSynced = false;
+
+            try
+            {
+                newCode = await FirebaseService.CreateGroupAsync(ownerId);
+                isCloudSynced = true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Profile] Firebase RTDB sync failed ({ex.Message}), creating local Starosta group.");
+                var random = new Random();
+                const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+                newCode = new string(Enumerable.Repeat(chars, 6).Select(s => s[random.Next(s.Length)]).ToArray());
+            }
+
+            // Always activate Starosta role for the creator!
+            AppState.SetGroupCode(newCode);
+            AppState.SetUserRole(UserRole.Starosta);
+            if (!string.IsNullOrEmpty(ownerId))
+            {
+                await FirebaseService.SaveUserMembershipAsync(ownerId, newCode, "Starosta");
+            }
+
+            if (isCloudSynced)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" 
+                    ? $"Group created! Your code: {newCode}" 
+                    : $"Utworzono grupę! Twój kod: {newCode}", 
+                    MainLayout.ToastType.Success);
+            }
+            else
+            {
+                Layout?.ShowToast(CurrentLang == "en-US"
+                    ? $"Starosta mode enabled ({newCode})! (Cloud sync: Firebase rules need .read/.write: true)"
+                    : $"Zostałeś Starostą grupy: {newCode}! (Uwaga: Baza Firebase wymaga reguł .read i .write: true w konsoli)",
+                    MainLayout.ToastType.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Profile] Błąd tworzenia grupy: {ex.Message}");
+            Layout?.ShowToast(CurrentLang == "en-US" ? $"Error: {ex.Message}" : $"Błąd: {ex.Message}", MainLayout.ToastType.Error);
+        }
+    }
+
+    // Oddanie starostwa
+    private void RequestResignStarosta()
+    {
+        targetStarostaAlbum = "";
+        IsResignStarostaModalOpen = true;
+    }
+
+    private void CancelResignStarosta()
+    {
+        targetStarostaAlbum = "";
+        IsResignStarostaModalOpen = false;
+    }
+
+    private async Task ConfirmResignStarosta()
+    {
+        if (string.IsNullOrWhiteSpace(targetStarostaAlbum))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please provide the student album number!" : "Podaj numer albumu nowego Starosty!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        string newOwner = targetStarostaAlbum.Trim();
+        string myId = ProfileService.StudentNumber;
+        if (string.IsNullOrEmpty(myId)) myId = ProfileService.Id;
+
+        if (!string.IsNullOrEmpty(myId) && newOwner.Equals(myId.Trim(), StringComparison.OrdinalIgnoreCase))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "You cannot transfer the role to yourself!" : "Nie możesz przekazać roli samemu sobie!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        bool success = await FirebaseService.TransferGroupOwnershipAsync(AppState.GroupCode, newOwner);
+
+        // Opublikuj ogłoszenie informujące o zmianie Starosty
+        try
+        {
+            await FirebaseService.PublishAnnouncementAsync(AppState.GroupCode, new AnnouncementItem
+            {
+                Title = CurrentLang == "en-US" ? "👑 Starosta Role Transfer" : "👑 Przekazanie roli Starosty",
+                Content = CurrentLang == "en-US" 
+                    ? $"Starosta role has been transferred to student with album number: {newOwner}." 
+                    : $"Rola Starosty została oficjalnie przekazana studentowi o numerze albumu: {newOwner}.",
+                ShortContent = CurrentLang == "en-US" ? $"New Starosta: {newOwner}" : $"Nowy Starosta: {newOwner}",
+                Author = CurrentLang == "en-US" ? "System / Starosta" : "System / Starosta",
+                CreatedAt = DateTime.Now,
+                ExpireDate = DateTime.Now.AddDays(14),
+                IsPriority = true
+            });
+        }
+        catch {}
+
+        AppState.SetUserRole(UserRole.Student);
+        if (!string.IsNullOrEmpty(myId))
+        {
+            await FirebaseService.SaveUserMembershipAsync(myId, AppState.GroupCode, "Student");
+        }
+        IsResignStarostaModalOpen = false;
+        targetStarostaAlbum = "";
+
+        if (success)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" 
+                ? $"Starosta role transferred to student {newOwner}!" 
+                : $"Pomyślnie przekazano rolę Starosty studentowi {newOwner}!", 
+                MainLayout.ToastType.Success);
+        }
+        else
+        {
+            Layout?.ShowToast(CurrentLang == "en-US"
+                ? $"Role transferred locally to student {newOwner}."
+                : $"Przekazano rolę studentowi {newOwner} (lokalnie).",
+                MainLayout.ToastType.Info);
+        }
+    }
+
+    // Opuszczenie grupy
+    private void RequestLeaveGroup()
+    {
+        IsLeaveModalOpen = true;
+        LeaveCountdown = 5;
+        CanLeaveNow = false;
+        
+        _leaveTimer = new System.Timers.Timer(1000);
+        _leaveTimer.Elapsed += (s, e) => {
+            LeaveCountdown--;
+            if (LeaveCountdown <= 0)
+            {
+                CanLeaveNow = true;
+                _leaveTimer.Stop();
+            }
+            InvokeAsync(StateHasChanged);
+        };
+        _leaveTimer.Start();
+    }
+
+    private void CancelLeave()
+    {
+        IsLeaveModalOpen = false;
+        _leaveTimer?.Stop();
+    }
+
+    private async Task ConfirmLeave()
+    {
+        string myId = ProfileService.StudentNumber;
+        if (string.IsNullOrEmpty(myId)) myId = Preferences.Default.Get("user_student_number", "");
+        string secondaryId = ProfileService.Id;
+        if (string.IsNullOrEmpty(secondaryId)) secondaryId = Preferences.Default.Get("user_usos_id", "");
+        string currentGroup = AppState.GroupCode;
+
+        // Natychmiastowa aktualizacja interfejsu (0ms opóźnienia)
+        AppState.SetGroupCode("");
+        AppState.SetUserRole(UserRole.Student);
+        IsLeaveModalOpen = false;
+        ScheduleService.PurgeGroupScheduleData();
+        Layout?.ShowToast(CurrentLang == "en-US" ? "Left group." : "Opuszczono grupę.", MainLayout.ToastType.Info);
+        StateHasChanged();
+
+        // Asynchroniczne usunięcie z bazy Firebase w tle
+        await FirebaseService.LeaveGroupAsync(myId, secondaryId, currentGroup);
+    }
+
+    private async Task ToggleThemeMode(ChangeEventArgs e)
+    {
+        IsLightMode = (bool)e.Value!;
+        await JS.InvokeVoidAsync("settingsManager.applyLightMode", IsLightMode ? "true" : "false");
+        await JS.InvokeVoidAsync("localStorage.setItem", "app_lightmode", IsLightMode.ToString().ToLower());
+        Layout?.ShowToast(IsLightMode 
+            ? (CurrentLang == "en-US" ? "Switched to light mode." : "Zmieniono interfejs na tryb jasny.") 
+            : (CurrentLang == "en-US" ? "Switched to dark mode." : "Zmieniono interfejs na tryb ciemny."));
+    }
+
+    private async Task ChangeTheme(string name, string hex)
+    {
+        CurrentTheme = name;
+        await JS.InvokeVoidAsync("localStorage.setItem", "app_theme_name", name);
+        await JS.InvokeVoidAsync("localStorage.setItem", "app_hex", hex);
+        await JS.InvokeVoidAsync("document.documentElement.style.setProperty", "--primary-color", hex);
+        Layout?.ShowToast(CurrentLang == "en-US" ? $"Accent color set to {name}!" : $"Zmieniono akcent aplikacji na {name}!");
+    }
+
+    private async Task ToggleNotifications(ChangeEventArgs e)
+    {
+        bool val = (bool)e.Value!;
+        if (val)
+        {
+            NotificationService.IsEnabled = true;
+            bool granted = await NotificationService.RequestPermissionAsync();
+            if (!granted)
+            {
+                NotificationService.IsEnabled = false;
+                Layout?.ShowToast(CurrentLang == "en-US" 
+                    ? "Notifications permission denied in iOS Settings." 
+                    : "Brak uprawnień do powiadomień w Ustawieniach iOS.", MainLayout.ToastType.Warning);
+            }
+            else
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" 
+                    ? "Notifications enabled." 
+                    : "Powiadomienia o zmianach włączone.", MainLayout.ToastType.Success);
+            }
+        }
+        else
+        {
+            NotificationService.IsEnabled = false;
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Notifications disabled." : "Powiadomienia wyłączone.");
+        }
+        StateHasChanged();
+    }
+
+    private async Task SendTestNotification()
+    {
+        bool success = await NotificationService.SendNotificationAsync(
+            "UniAvio: Test alert 🔔",
+            CurrentLang == "en-US" ? "Schedule notifications are working properly!" : "Powiadomienia o zmianach w planie działają poprawnie!");
+
+        if (success)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Test notification sent!" : "Wysłano testowe powiadomienie!", MainLayout.ToastType.Success);
+        }
+        else
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" 
+                ? "Notification not delivered. Check System Settings > Notifications > UniAvio." 
+                : "Nie wyświetlono powiadomienia. Sprawdź Ustawienia systemowe > Powiadomienia > UniAvio.", MainLayout.ToastType.Warning);
+        }
+    }
+
+    private async Task ExportAllToCalendar()
+    {
+        var prepared = ScheduleService.GetPreparedData();
+        if (!prepared.Any())
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "No classes to export." : "Brak zajęć do wyeksportowania.", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        try
+        {
+            await CalendarExportService.ExportToSystemCalendarAsync(prepared, includeAlarms: true);
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Opening Calendar..." : "Otwieranie Kalendarza...", MainLayout.ToastType.Success);
+        }
+        catch (Exception ex)
+        {
+            Layout?.ShowToast($"Błąd: {ex.Message}", MainLayout.ToastType.Error);
+        }
+    }
+
+    private async Task ShareCalendarIcs()
+    {
+        var prepared = ScheduleService.GetPreparedData();
+        if (!prepared.Any())
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "No classes to export." : "Brak zajęć do wyeksportowania.", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        try
+        {
+            await CalendarExportService.ShareIcsFileAsync(prepared, includeAlarms: true);
+        }
+        catch (Exception ex)
+        {
+            Layout?.ShowToast($"Błąd: {ex.Message}", MainLayout.ToastType.Error);
+        }
+    }
+
+    private bool isSyncingTerm = false;
+
+    private void OnWeekParityChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int modeInt))
+        {
+            AppState.WeekParity = (WeekParityMode)modeInt;
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Week parity setting saved" : "Zapisano ustawienie parzystości tygodnia", MainLayout.ToastType.Success);
+        }
+    }
+
+    private async Task SyncWeekInfoFromUsos()
+    {
+        isSyncingTerm = true;
+        StateHasChanged();
+        try
+        {
+            var result = await ScheduleService.FetchAndSyncTermFromUsosAsync(UsosApiService);
+            if (!string.IsNullOrEmpty(result))
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? $"Synced term: {result}" : $"Pobrano dane semestru: {result}", MainLayout.ToastType.Success);
+            }
+            else
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Could not fetch semester from USOS (using local calendar)" : "Nie udało się pobrać semestru z USOS (użyto kalendarza lokalnego)", MainLayout.ToastType.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            Layout?.ShowToast($"Błąd: {ex.Message}", MainLayout.ToastType.Error);
+        }
+        finally
+        {
+            isSyncingTerm = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Logout()
+    {
+        FirebaseService.UnsubscribeAllSubscriptions();
+        await UsosAuthService.LogoutAsync();
+        ProfileService.Clear();
+        ScheduleService.Clear();
+        AppState.Reset();
+        Nav.NavigateTo("/login", true);
+    }
+    
+    private async Task DeleteAccount()
+    {
+        string prompt = CurrentLang == "en-US" 
+            ? "Are you sure you want to delete your account? All data, announcements and group memberships will be lost." 
+            : "Czy na pewno chcesz usunąć swoje konto z bazy aplikacji? Utracisz wszystkie zapisane dane, ogłoszenia oraz przynależność do grup.";
+        bool confirmed = await JS.InvokeAsync<bool>("confirm", prompt);
+        if (confirmed)
+        {
+            string myId = ProfileService.StudentNumber;
+            if (string.IsNullOrEmpty(myId)) myId = Preferences.Default.Get("user_student_number", "");
+            string secondaryId = ProfileService.Id;
+            if (string.IsNullOrEmpty(secondaryId)) secondaryId = Preferences.Default.Get("user_usos_id", "");
+
+            if (!string.IsNullOrEmpty(myId) || !string.IsNullOrEmpty(secondaryId))
+            {
+                await FirebaseService.DeleteUserAccountAsync(myId, secondaryId);
+            }
+            else if (AppState.IsStarostaMode && !string.IsNullOrEmpty(AppState.GroupCode))
+            {
+                await FirebaseService.DeleteGroupAsync(AppState.GroupCode);
+            }
+
+            AppState.Reset();
+            await Logout();
+        }
+    }
+
+    public void Dispose()
+    {
+        AppState.OnChange -= OnAppStateChanged;
+        _leaveTimer?.Dispose();
+    }
+}

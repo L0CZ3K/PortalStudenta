@@ -1,0 +1,48 @@
+### ==============================================================================
+### UniAvio (Portal Studenta) - Firebase Realtime Database Explorer
+### ==============================================================================
+### Użycie: Kliknij zieloną ikonę "Run" (▶) obok dowolnego zapytania w Riderze.
+### Wynik w formacie JSON z możliwością przeszukiwania otworzy się w panelu obok.
+### ==============================================================================
+
+@baseUrl = https://uniavio-default-rtdb.europe-west1.firebasedatabase.app
+
+### 1. Pobierz informacje o konkretnej grupie (zastąp KOD_GRUPY np. W1 lub TEST)
+GET {{baseUrl}}/groups/TEST.json
+Accept: application/json
+
+###
+
+### 2. Pobierz wydarzenia dla grupy (np. TEST)
+GET {{baseUrl}}/groups/TEST/events.json
+Accept: application/json
+
+###
+
+### 3. Pobierz ogłoszenia dla grupy (np. TEST)
+GET {{baseUrl}}/groups/TEST/announcements.json
+Accept: application/json
+
+###
+
+### 4. Pobierz modyfikacje planu / odwołane zajęcia dla grupy (np. TEST)
+GET {{baseUrl}}/groups/TEST/modifications.json
+Accept: application/json
+
+###
+
+### 5. Pobierz ankiety dla grupy (np. TEST)
+GET {{baseUrl}}/groups/TEST/polls.json
+Accept: application/json
+
+###
+
+### 6. Pobierz profil i członkostwo użytkownika (zastąp NUMER_ALBUMU)
+GET {{baseUrl}}/users/12345/membership.json
+Accept: application/json
+
+###
+
+### 7. Pobierz osobiste wydarzenia użytkownika w chmurze
+GET {{baseUrl}}/users/12345/personal_events.json
+Accept: application/json

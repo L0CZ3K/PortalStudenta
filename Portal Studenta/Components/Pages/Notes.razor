@@ -1,0 +1,3019 @@
+@page "/notes"
+@using Portal_Studenta.Models
+@using Portal_Studenta.Services
+@inject NoteService NoteService
+@inject ScheduleService ScheduleService
+@inject FirebaseService FirebaseService
+@inject AppState AppState
+@inject IJSRuntime JS
+@implements IDisposable
+
+<style>
+
+    .notes-container {
+        display: flex;
+        height: calc(100vh - 28px);
+        width: 100%;
+        max-width: 100%;
+        margin: 0 !important;
+        background: var(--bg-main);
+        border: 1px solid var(--border-color);
+        border-radius: 14px;
+        overflow: hidden;
+        position: relative;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        color: var(--text-main);
+        user-select: none;
+    }
+
+    /* --- KOLUMNA 1: DRZEWO FOLDERÓW (SIDEBAR) --- */
+    .notes-sidebar-col {
+        width: 270px;
+        min-width: 240px;
+        max-width: 320px;
+        background: var(--card-bg);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        overflow: hidden;
+    }
+
+    .notes-mobile-back-btn {
+        display: none;
+        align-items: center;
+        gap: 3px;
+        background: transparent;
+        border: none;
+        color: var(--primary-color);
+        font-size: 0.92rem;
+        font-weight: 600;
+        cursor: pointer;
+        padding: 4px 6px;
+        border-radius: 8px;
+        transition: opacity 0.15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .notes-mobile-back-btn:active {
+        opacity: 0.6;
+    }
+
+    .notes-mobile-done-btn {
+        display: none;
+        background: transparent;
+        border: none;
+        color: var(--primary-color);
+        font-size: 0.92rem;
+        font-weight: 700;
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: 8px;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .notes-mobile-done-btn:active {
+        opacity: 0.6;
+    }
+
+    .sidebar-header {
+        padding: 14px 16px 10px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .sidebar-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .folders-scroll-area {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    /* KARTA APARATU ZDALNEGO W FOLDERACH */
+    .remote-camera-quick-card {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: linear-gradient(135deg, rgba(234, 179, 8, 0.16) 0%, rgba(245, 158, 11, 0.08) 100%);
+        border: 1px solid rgba(234, 179, 8, 0.38);
+        border-radius: 12px;
+        padding: 10px 14px;
+        margin: 6px 4px 10px 4px;
+        cursor: pointer;
+        transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+        user-select: none;
+    }
+
+    .remote-camera-quick-card:hover {
+        background: linear-gradient(135deg, rgba(234, 179, 8, 0.24) 0%, rgba(245, 158, 11, 0.14) 100%);
+        border-color: rgba(234, 179, 8, 0.6);
+        transform: translateY(-1px);
+    }
+
+    .remote-camera-quick-card:active {
+        transform: scale(0.98);
+        background: rgba(234, 179, 8, 0.28);
+    }
+
+    .rc-card-icon {
+        font-size: 1.4rem;
+        background: rgba(234, 179, 8, 0.22);
+        width: 38px;
+        height: 38px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .rc-card-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    .rc-card-title {
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: var(--text-main);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .rc-card-sub {
+        font-size: 0.72rem;
+        color: var(--text-muted);
+        line-height: 1.25;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .rc-card-arrow {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #eab308;
+        padding-left: 4px;
+        flex-shrink: 0;
+    }
+
+    .remote-cam-header-btn {
+        background: rgba(234, 179, 8, 0.18);
+        border: 1px solid rgba(234, 179, 8, 0.38);
+        border-radius: 8px;
+        padding: 4px 10px;
+        font-weight: 600;
+        color: var(--text-main);
+        font-size: 0.78rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .remote-cam-header-btn:hover {
+        background: rgba(234, 179, 8, 0.28);
+    }
+
+    .remote-cam-header-btn:active {
+        transform: scale(0.96);
+    }
+
+    .folder-section-label {
+        font-size: 0.68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--text-muted);
+        padding: 12px 10px 4px 10px;
+    }
+
+    .folder-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 0.86rem;
+        font-weight: 500;
+        color: var(--text-main);
+        transition: background 0.15s ease, color 0.15s ease;
+        text-decoration: none;
+    }
+
+    .folder-item:hover {
+        background: var(--hover-bg);
+    }
+
+    .folder-item.active {
+        background: var(--primary-color);
+        color: #ffffff !important;
+        font-weight: 600;
+    }
+
+    .folder-item.active .folder-count {
+        background: rgba(255, 255, 255, 0.25);
+        color: #ffffff;
+    }
+
+    .folder-info {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        flex: 1;
+    }
+
+    .folder-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .folder-count {
+        font-size: 0.72rem;
+        font-weight: 600;
+        background: rgba(120, 120, 128, 0.15);
+        color: var(--text-muted);
+        padding: 1px 7px;
+        border-radius: 10px;
+        flex-shrink: 0;
+    }
+
+    .nested-folder-group {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .nested-indent-1 {
+        padding-left: 24px !important;
+        font-size: 0.82rem !important;
+    }
+
+    .nested-indent-2 {
+        padding-left: 42px !important;
+        font-size: 0.78rem !important;
+    }
+
+    .collapse-chevron {
+        cursor: pointer;
+        font-size: 0.65rem;
+        width: 14px;
+        text-align: center;
+        color: var(--text-muted);
+        user-select: none;
+    }
+
+    /* --- KOLUMNA 2: LISTA NOTATEK --- */
+    .notes-list-col {
+        width: 320px;
+        min-width: 280px;
+        max-width: 380px;
+        background: var(--card-bg);
+        border-right: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        flex-shrink: 0;
+        overflow: hidden;
+    }
+
+    .list-header {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border-color);
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .list-header-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .list-title {
+        font-size: 1.15rem;
+        font-weight: 700;
+        margin: 0;
+        letter-spacing: -0.015em;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .search-input-wrapper {
+        position: relative;
+        width: 100%;
+    }
+
+    .search-input-wrapper input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 12px 6px 32px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        background: rgba(120, 120, 128, 0.08);
+        color: var(--text-main);
+        font-size: 0.84rem;
+        outline: none;
+        transition: border-color 0.2s, background 0.2s;
+    }
+
+    .search-input-wrapper input:focus {
+        border-color: var(--primary-color);
+        background: var(--card-bg);
+    }
+
+    .search-icon {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        pointer-events: none;
+    }
+
+    .notes-cards-scroll {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .note-card {
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid transparent;
+        background: rgba(120, 120, 128, 0.04);
+        cursor: pointer;
+        transition: all 0.15s ease;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        position: relative;
+    }
+
+    .note-card:hover {
+        background: var(--hover-bg);
+        border-color: var(--border-color);
+    }
+
+    .note-card.active {
+        background: rgba(10, 132, 255, 0.12);
+        border-color: rgba(10, 132, 255, 0.35);
+    }
+
+    .note-card-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .note-card-title {
+        font-size: 0.92rem;
+        font-weight: 700;
+        color: var(--text-main);
+        margin: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+    }
+
+    .note-card-snippet {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: break-word;
+    }
+
+    .note-card-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 2px;
+        font-size: 0.72rem;
+        color: var(--text-muted);
+    }
+
+    .note-badges-wrap {
+        display: flex;
+        gap: 4px;
+        align-items: center;
+    }
+
+    .note-badge-pill {
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 0.68rem;
+        font-weight: 600;
+        background: rgba(120, 120, 128, 0.12);
+        color: var(--text-main);
+    }
+
+    /* --- KOLUMNA 3: ZAAWANSOWANY EDYTOR NOTATEK WYSIWYG --- */
+    .note-editor-col {
+        flex: 1;
+        background: var(--bg-main);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+    }
+
+    .editor-toolbar {
+        padding: 8px 14px;
+        border-bottom: 1px solid var(--border-color);
+        background: var(--card-bg);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .editor-tools-scroll {
+        order: 1;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+        flex: 1;
+    }
+
+    .editor-nav-bar {
+        order: 2;
+        display: flex;
+        align-items: center;
+    }
+
+    .editor-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .notes-mobile-back-btn,
+    .notes-mobile-done-btn {
+        display: none;
+    }
+
+    .toolbar-tool-btn {
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 4px 8px;
+        font-size: 0.84rem;
+        font-weight: 600;
+        color: var(--text-main);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        transition: all 0.15s ease;
+        height: 28px;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+
+    .toolbar-tool-btn:hover {
+        background: var(--hover-bg);
+        border-color: var(--border-color);
+    }
+
+    .toolbar-tool-btn:active {
+        background: rgba(120, 120, 128, 0.2);
+    }
+
+    .toolbar-tool-btn.active {
+        background: rgba(234, 179, 8, 0.18) !important;
+        color: #eab308 !important;
+        border-color: rgba(234, 179, 8, 0.4) !important;
+    }
+
+    .toolbar-separator {
+        width: 1px;
+        height: 18px;
+        background: var(--border-color);
+        margin: 0 4px;
+        flex-shrink: 0;
+    }
+
+    .editor-body-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 24px 32px;
+        overflow-y: auto;
+        box-sizing: border-box;
+        background: var(--bg-main);
+    }
+
+    .note-title-input {
+        width: 100%;
+        border: none;
+        background: transparent;
+        font-size: 1.85rem;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        color: var(--text-main);
+        outline: none;
+        margin-bottom: 10px;
+        padding: 0;
+        font-family: inherit;
+    }
+
+    .note-meta-breadcrumbs {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        margin-bottom: 18px;
+        flex-wrap: wrap;
+    }
+
+    .breadcrumb-tag {
+        background: rgba(120, 120, 128, 0.1);
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-weight: 500;
+    }
+
+    /* GŁÓWNY EDYTOR WYSIWYG */
+    .notes-rich-editor {
+        flex: 1;
+        width: 100%;
+        min-height: 400px;
+        outline: none;
+        border: none;
+        color: var(--text-main);
+        font-size: 1.05rem;
+        line-height: 1.65;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+        box-sizing: border-box;
+        padding: 0;
+        user-select: text;
+        word-break: break-word;
+    }
+
+    .notes-rich-editor:empty:before {
+        content: attr(data-placeholder);
+        color: var(--text-muted);
+        opacity: 0.5;
+        pointer-events: none;
+    }
+
+    .notes-rich-editor h1 { font-size: 1.8rem; font-weight: 800; margin-top: 14px; margin-bottom: 8px; }
+    .notes-rich-editor h2 { font-size: 1.4rem; font-weight: 700; margin-top: 12px; margin-bottom: 6px; }
+    .notes-rich-editor p { margin: 6px 0; }
+    .notes-rich-editor ul, .notes-rich-editor ol { padding-left: 24px; margin: 8px 0; }
+    .notes-rich-editor blockquote {
+        border-left: 3px solid var(--primary-color);
+        padding-left: 12px;
+        margin: 10px 0;
+        color: var(--text-muted);
+        font-style: italic;
+    }
+
+    /* ZDJĘCIA W TEKŚCIE (INLINE IMAGES) */
+    .notes-rich-editor img.note-inline-image,
+    .notes-rich-editor img,
+    .note-inline-image {
+        max-width: 100%;
+        max-height: 520px;
+        object-fit: contain;
+        border-radius: 12px;
+        margin: 10px 0;
+        display: block;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .notes-rich-editor img.note-inline-image:hover,
+    .note-inline-image:hover {
+        transform: scale(1.006);
+        box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
+    }
+
+    /* INTERAKTYWNA CHECKLISTA */
+    .notes-checklist-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 6px 0;
+        line-height: 1.5;
+    }
+
+    .notes-checklist-item input[type="checkbox"] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 19px;
+        height: 19px;
+        border-radius: 50%;
+        border: 2px solid var(--text-muted);
+        background: transparent;
+        cursor: pointer;
+        margin-top: 3px;
+        flex-shrink: 0;
+        transition: all 0.15s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        outline: none;
+    }
+
+    .notes-checklist-item input[type="checkbox"]:checked {
+        background: #eab308 !important; /* Zaznaczenie wykonania */
+        border-color: #eab308 !important;
+    }
+
+    .notes-checklist-item input[type="checkbox"]:checked::after {
+        content: "✓";
+        color: #000000;
+        font-size: 13px;
+        font-weight: 900;
+        line-height: 1;
+    }
+
+    .notes-checklist-item.checked span,
+    .notes-checklist-item:has(input:checked) span {
+        text-decoration: line-through;
+        color: var(--text-muted);
+    }
+
+    /* KOD IDE ZE STYLIZACJĄ */
+    .notes-code-card {
+        background: #18181f; /* Ciemne tło IDE */
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 10px;
+        margin: 14px 0;
+        overflow: hidden;
+        font-family: ui-monospace, Menlo, Monaco, "Cascadia Mono", "JetBrains Mono", monospace;
+    }
+
+    .notes-code-header {
+        background: rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 6px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        user-select: none;
+    }
+
+    .code-header-left {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .code-lang-badge {
+        font-size: 0.85rem;
+    }
+
+    .code-lang-select {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: #e2e8f0;
+        font-size: 0.74rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 5px;
+        outline: none;
+        cursor: pointer;
+    }
+
+    .code-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .code-format-btn, .code-copy-btn {
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        color: var(--text-main);
+        font-size: 0.72rem;
+        font-weight: 600;
+        padding: 2px 8px;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+
+    .code-format-btn:hover, .code-copy-btn:hover {
+        background: rgba(255, 255, 255, 0.18);
+    }
+
+    .notes-code-card pre {
+        margin: 0;
+        padding: 12px 14px;
+        overflow-x: auto;
+        font-size: 0.88rem;
+        line-height: 1.5;
+        color: #e2e8f0;
+    }
+
+    .notes-code-card code {
+        background: transparent !important;
+        padding: 0 !important;
+        font-family: inherit;
+        color: inherit;
+        outline: none;
+        white-space: pre;
+    }
+
+    /* KOLOROWANIE SKŁADNI IDE (VS Code / JetBrains Dark) */
+    .tok-kw { color: #569cd6 !important; font-weight: 600; }
+    .tok-str { color: #ce9178 !important; }
+    .tok-com { color: #6a9955 !important; font-style: italic; }
+    .tok-num { color: #b5cea8 !important; }
+    .tok-fn { color: #dcdcaa !important; }
+    .tok-type { color: #4ec9b0 !important; }
+    .tok-op { color: #d4d4d4 !important; }
+
+    /* ZAKREŚLACZ TEKSTU */
+    mark.notes-highlighter {
+        background-color: rgba(254, 240, 138, 0.4) !important;
+        color: inherit !important;
+        border-radius: 3px;
+        padding: 1px 3px;
+    }
+
+    /* ZAŁĄCZNIKI I MINIATURY TABLICY */
+    .note-attachments-strip {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 16px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .attachment-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 9px;
+        padding: 4px 8px;
+        max-width: 260px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        user-select: none;
+    }
+
+    .attachment-chip:hover {
+        background: var(--hover-bg);
+        border-color: var(--primary-color);
+    }
+
+    .attachment-chip-thumb {
+        width: 36px;
+        height: 36px;
+        object-fit: cover;
+        border-radius: 6px;
+        border: 1px solid rgba(0, 0, 0, 0.1);
+        flex-shrink: 0;
+    }
+
+    .attachment-chip-icon {
+        font-size: 1.4rem;
+        flex-shrink: 0;
+    }
+
+    .attachment-chip-details {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        flex: 1;
+    }
+
+    .attachment-chip-name {
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--text-main);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .attachment-chip-size {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+    }
+
+    .attachment-chip-delete {
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        font-weight: 700;
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 4px;
+        transition: color 0.15s ease;
+    }
+
+    .attachment-chip-delete:hover {
+        color: var(--danger-color);
+        background: rgba(239, 68, 68, 0.1);
+    }
+
+    /* LIGHTBOX TABLICY */
+    .image-lightbox-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.88);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    .image-lightbox-dialog {
+        background: #18181f;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 14px;
+        max-width: 92vw;
+        max-height: 92vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+    }
+
+    .image-lightbox-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 18px;
+        background: rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .lightbox-title-wrap {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .lightbox-title {
+        font-weight: 700;
+        font-size: 0.95rem;
+        color: #ffffff;
+    }
+
+    .lightbox-size {
+        font-size: 0.75rem;
+        color: rgba(255, 255, 255, 0.6);
+    }
+
+    .lightbox-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .lightbox-close-btn {
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        color: #ffffff;
+        font-size: 1.1rem;
+        border-radius: 50%;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.15s ease;
+    }
+
+    .lightbox-close-btn:hover {
+        background: rgba(255, 255, 255, 0.25);
+    }
+
+    .image-lightbox-body {
+        padding: 16px;
+        overflow: auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        max-height: 80vh;
+    }
+
+    .image-lightbox-img {
+        max-width: 100%;
+        max-height: 75vh;
+        object-fit: contain;
+        border-radius: 8px;
+    }
+
+    /* REMOTE CAMERA MODAL */
+    .remote-cam-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(5px);
+        -webkit-backdrop-filter: blur(5px);
+        z-index: 9998;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+    }
+
+    .remote-cam-dialog {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 16px;
+        width: 100%;
+        max-width: 480px;
+        overflow: hidden;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+    }
+
+    .remote-cam-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .remote-cam-body {
+        padding: 20px;
+    }
+
+    .remote-cam-code-card {
+        background: rgba(120, 120, 128, 0.08);
+        border: 2px dashed var(--primary-color);
+        border-radius: 12px;
+        padding: 16px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        align-items: center;
+    }
+
+    .remote-cam-code {
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 2.2rem;
+        letter-spacing: 0.15em;
+        font-weight: 800;
+        color: var(--primary-color);
+        margin: 4px 0;
+    }
+
+    /* Pusty stan */
+    .empty-editor-placeholder {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-muted);
+        gap: 12px;
+        padding: 40px;
+        text-align: center;
+    }
+
+    .empty-editor-icon {
+        font-size: 3.2rem;
+        opacity: 0.4;
+    }
+
+    /* --- MOBILNA RESPONSYWNOŚĆ (iOS) --- */
+    @@media (max-width: 820px) {
+        .editor-toolbar {
+            display: flex;
+            flex-direction: column;
+            padding: 8px 12px 6px 12px;
+            gap: 6px;
+        }
+
+        .editor-nav-bar {
+            order: 1;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+        }
+
+        .notes-mobile-back-btn {
+            display: inline-flex !important;
+            align-items: center;
+            gap: 4px;
+            background: transparent;
+            border: none;
+            color: var(--primary-color);
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 6px;
+        }
+
+        .notes-mobile-done-btn {
+            display: inline-flex !important;
+            background: transparent;
+            border: none;
+            color: var(--primary-color);
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 6px;
+        }
+
+        .editor-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .editor-tools-scroll {
+            order: 2;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            overflow-x: auto;
+            flex-wrap: nowrap;
+            width: 100%;
+            -webkit-overflow-scrolling: touch;
+            padding: 2px 2px 4px 2px;
+            scrollbar-width: none;
+        }
+
+        .editor-tools-scroll::-webkit-scrollbar {
+            display: none;
+        }
+
+        .desktop-only-btn {
+            display: none !important;
+        }
+
+        .notes-container {
+            height: calc(100dvh - 48px - env(safe-area-inset-top, 0px) - 56px - env(safe-area-inset-bottom, 0px)) !important;
+            border: none !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            width: 100% !important;
+            max-width: 100% !important;
+        }
+
+        .notes-sidebar-col,
+        .notes-list-col,
+        .note-editor-col {
+            height: 100% !important;
+        }
+
+        .folders-scroll-area {
+            padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)) !important;
+        }
+
+        .notes-cards-scroll {
+            padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px)) !important;
+        }
+
+        .notes-sidebar-col {
+            width: 100%;
+            max-width: none;
+            display: none;
+        }
+
+        .notes-list-col {
+            width: 100%;
+            max-width: none;
+            display: none;
+        }
+
+        .note-editor-col {
+            display: none;
+        }
+
+        .notes-container.mobile-depth-0 .notes-sidebar-col {
+            display: flex;
+        }
+
+        .notes-container.mobile-depth-1 .notes-list-col {
+            display: flex;
+        }
+
+        .notes-container.mobile-depth-2 .note-editor-col {
+            display: flex;
+        }
+
+        .editor-body-area {
+            padding: 16px 18px;
+            padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)) !important;
+        }
+    }
+</style>
+
+<div class="notes-container @($"mobile-depth-{mobileDepth}")">
+    <!-- ==================================================================== -->
+    <!-- KOLUMNA 1: DRZEWO FOLDERÓW AKADEMICKICH Z USOS -->
+    <!-- ==================================================================== -->
+    <div class="notes-sidebar-col">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">
+                <span>📁</span>
+                <span>@(CurrentLang == "en-US" ? "Folders" : "Foldery")</span>
+            </h2>
+            <div style="display: flex; gap: 6px; align-items: center;">
+                @if (IsPhone)
+                {
+                <button class="btn btn-sm remote-cam-header-btn" @onclick="OpenPhoneTransmitModal" title="Prześlij zdjęcie z telefonu do komputera">
+                    📸 Wyślij do PC
+                </button>
+                }
+                <button class="btn btn-sm" @onclick="CreateUncategorizedNote" title="Nowa szybka notatka" style="background: rgba(120, 120, 128, 0.15); border-radius: 8px; padding: 4px 10px; font-weight: 700; color: var(--text-main);">
+                    +
+                </button>
+            </div>
+        </div>
+
+        <div class="folders-scroll-area">
+
+            <!-- Foldery systemowe -->
+            <div class="folder-section-label">@(CurrentLang == "en-US" ? "Quick Access" : "Szybki dostęp")</div>
+            @foreach (var sysFolder in folderHierarchy.Where(f => f.FolderType is NoteFolderType.All or NoteFolderType.Pinned or NoteFolderType.Shared or NoteFolderType.Uncategorized))
+            {
+                <div class="folder-item @(selectedFolder?.Id == sysFolder.Id ? "active" : "")" @onclick="() => SelectFolder(sysFolder)">
+                    <div class="folder-info">
+                        <span>@sysFolder.Icon</span>
+                        <span class="folder-name">@sysFolder.Name</span>
+                    </div>
+                    <span class="folder-count">@sysFolder.NoteCount</span>
+                </div>
+            }
+
+            <!-- Foldery z przedmiotów USOS -->
+            <div class="folder-section-label">@(CurrentLang == "en-US" ? "USOS Timetable Courses" : "Przedmioty z USOS")</div>
+            @if (!folderHierarchy.Any(f => f.FolderType == NoteFolderType.Subject))
+            {
+                <div style="padding: 10px; font-size: 0.8rem; color: var(--text-muted); text-align: center;">
+                    @(CurrentLang == "en-US" ? "No courses loaded from USOS." : "Brak przedmiotów z USOS.")
+                </div>
+            }
+            @foreach (var subj in folderHierarchy.Where(f => f.FolderType == NoteFolderType.Subject))
+            {
+                <div class="nested-folder-group">
+                    <div class="folder-item @(selectedFolder?.Id == subj.Id ? "active" : "")" @onclick="() => SelectFolder(subj)">
+                        <div class="folder-info">
+                            <span class="collapse-chevron" @onclick:stopPropagation="true" @onclick="() => ToggleFolderExpanded(subj)">
+                                @(subj.IsExpanded ? "▼" : "▶")
+                            </span>
+                            <span>@subj.Icon</span>
+                            <span class="folder-name">@subj.Name</span>
+                        </div>
+                        <span class="folder-count">@subj.NoteCount</span>
+                    </div>
+
+                    @if (subj.IsExpanded)
+                    {
+                        @foreach (var typeNode in subj.Children)
+                        {
+                            <div class="folder-item nested-indent-1 @(selectedFolder?.Id == typeNode.Id ? "active" : "")" @onclick="() => SelectFolder(typeNode)">
+                                <div class="folder-info">
+                                    @if (typeNode.Children.Any())
+                                    {
+                                        <span class="collapse-chevron" @onclick:stopPropagation="true" @onclick="() => ToggleFolderExpanded(typeNode)">
+                                            @(typeNode.IsExpanded ? "▼" : "▶")
+                                        </span>
+                                    }
+                                    <span>@typeNode.Icon</span>
+                                    <span class="folder-name">@typeNode.Name</span>
+                                </div>
+                                <span class="folder-count">@typeNode.NoteCount</span>
+                            </div>
+
+                            @if (typeNode.IsExpanded && typeNode.Children.Any())
+                            {
+                                @foreach (var grpNode in typeNode.Children)
+                                {
+                                    <div class="folder-item nested-indent-2 @(selectedFolder?.Id == grpNode.Id ? "active" : "")" @onclick="() => SelectFolder(grpNode)">
+                                        <div class="folder-info">
+                                            <span>@grpNode.Icon</span>
+                                            <span class="folder-name">@grpNode.Name</span>
+                                        </div>
+                                        <span class="folder-count">@grpNode.NoteCount</span>
+                                    </div>
+                                }
+                            }
+                        }
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- KOLUMNA 2: LISTA NOTATEK -->
+    <!-- ==================================================================== -->
+    <div class="notes-list-col">
+        <div class="list-header">
+            <div class="list-header-row">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button class="notes-mobile-back-btn" @onclick="GoBackToFolders" title='@(CurrentLang == "en-US" ? "Back to folders" : "Powrót do folderów")'>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 17px; height: 17px;">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                        <span>@(CurrentLang == "en-US" ? "Folders" : "Foldery")</span>
+                    </button>
+                    <h3 class="list-title">@(selectedFolder?.Name ?? (CurrentLang == "en-US" ? "All Notes" : "Wszystkie notatki"))</h3>
+                </div>
+                <button class="btn btn-sm btn-primary" @onclick="CreateNewNoteInSelectedFolder" title="Dodaj notatkę do tego folderu" style="border-radius: 8px; font-weight: 600; padding: 4px 10px; font-size: 0.82rem;">
+                    + @(CurrentLang == "en-US" ? "New" : "Nowa")
+                </button>
+            </div>
+            <div class="search-input-wrapper">
+                <span class="search-icon">🔍</span>
+                <input type="text" placeholder='@(CurrentLang == "en-US" ? "Search notes..." : "Szukaj notatek...")' @bind="searchQuery" @bind:event="oninput" />
+            </div>
+        </div>
+
+        <div class="notes-cards-scroll">
+            @if (!FilteredNotes.Any())
+            {
+                <div style="padding: 30px 10px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+                    @(string.IsNullOrWhiteSpace(searchQuery)
+                        ? (CurrentLang == "en-US" ? "No notes in this folder." : "Brak notatek w tym folderze.")
+                        : (CurrentLang == "en-US" ? "No matching notes found." : "Brak pasujących notatek."))
+                </div>
+            }
+            @foreach (var note in FilteredNotes)
+            {
+                <div class="note-card @(activeNote?.Id == note.Id ? "active" : "")" @onclick="() => SelectNote(note)">
+                    <div class="note-card-title-row">
+                        <h4 class="note-card-title">
+                            @(string.IsNullOrWhiteSpace(note.Title) ? (CurrentLang == "en-US" ? "New Note" : "Nowa notatka") : note.Title)
+                        </h4>
+                        @if (note.IsPinned)
+                        {
+                            <span style="font-size: 0.8rem;" title="Przypięta">📌</span>
+                        }
+                    </div>
+                    <div class="note-card-snippet">
+                        @GetCleanSnippet(note.Content)
+                    </div>
+                    <div class="note-card-footer">
+                        <span>@FormatNoteDate(note.UpdatedAt)</span>
+                        <div class="note-badges-wrap">
+                            @if (!string.IsNullOrWhiteSpace(note.Subject))
+                            {
+                                <span class="note-badge-pill">@FormatShortBadge(note.Subject, note.LessonType, note.GroupName)</span>
+                            }
+                            @if (note.IsSharedWithGroup)
+                            {
+                                <span class="note-badge-pill" style="color: var(--primary-color);">👥</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- KOLUMNA 3: ZAAWANSOWANY EDYTOR NOTATEK WYSIWYG -->
+    <!-- ==================================================================== -->
+    <div class="note-editor-col">
+        @if (activeNote != null)
+        {
+            <div class="editor-toolbar">
+                <div class="editor-nav-bar">
+                    <button class="notes-mobile-back-btn" @onclick="GoBackToNotesList" title='@(CurrentLang == "en-US" ? "Back to notes" : "Powrót do notatek")'>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 17px; height: 17px;">
+                            <polyline points="15 18 9 12 15 6"></polyline>
+                        </svg>
+                        <span>@(CurrentLang == "en-US" ? "Notes" : "Notatki")</span>
+                    </button>
+
+                    <div class="editor-header-actions">
+                        <button class="toolbar-tool-btn @(activeNote.IsPinned ? "active" : "")" @onclick="TogglePinActiveNote" title="Przypnij notatkę">
+                            📌
+                        </button>
+                        <button class="toolbar-tool-btn @(activeNote.IsSharedWithGroup ? "active" : "")" @onclick="ToggleShareActiveNote" title="Udostępnij w Lobby grupy">
+                            👥
+                        </button>
+                        <button class="toolbar-tool-btn" @onclick="DeleteActiveNote" title="Usuń notatkę" style="color: var(--danger-color);">
+                            🗑️
+                        </button>
+                        <button class="notes-mobile-done-btn" @onclick="GoBackToNotesList" title='@(CurrentLang == "en-US" ? "Done" : "Gotowe")'>
+                            @(CurrentLang == "en-US" ? "Done" : "Gotowe")
+                        </button>
+                    </div>
+                </div>
+
+                <div class="editor-tools-scroll">
+                    <!-- Style nagłówków (Title, Subtitle, Body) -->
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.setHeading('H1');" title="Tytuł duży (H1)">
+                        <b>H1</b>
+                    </button>
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.setHeading('H2');" title="Nagłówek (H2)">
+                        <b>H2</b>
+                    </button>
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.setHeading('P');" title="Zwykły tekst (Aa)">
+                        Aa
+                    </button>
+
+                    <div class="toolbar-separator"></div>
+
+                    <!-- Podstawowe formatowanie inline -->
+                    <button type="button" id="btn-format-bold" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.exec('bold');" title="Pogrubienie (Cmd+B)">
+                        <b>B</b>
+                    </button>
+                    <button type="button" id="btn-format-italic" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.exec('italic');" title="Kursywa (Cmd+I)">
+                        <i>I</i>
+                    </button>
+                    <button type="button" id="btn-format-underline" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.exec('underline');" title="Podkreślenie (Cmd+U)">
+                        <u>U</u>
+                    </button>
+                    <button type="button" id="btn-format-strike" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.exec('strikeThrough');" title="Przekreślenie">
+                        <s>S</s>
+                    </button>
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.toggleHighlightColor();" title="Zakreślacz tekstu">
+                        🖊️
+                    </button>
+
+                    <div class="toolbar-separator"></div>
+
+                    <!-- Listy i checklisty -->
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.insertChecklist();" title="Lista zadań / checklista">
+                        🔘
+                    </button>
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.exec('insertUnorderedList');" title="Lista punktowana">
+                        •
+                    </button>
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.exec('insertOrderedList');" title="Lista numerowana">
+                        1.
+                    </button>
+
+                    <div class="toolbar-separator"></div>
+
+                    <!-- Blok kodu IDE z pojedynczym przyciskiem </> -->
+                    <button type="button" class="toolbar-tool-btn" onmousedown="event.preventDefault(); window.notesEditor.insertCodeBlock('C#');" title="Wstaw blok kodu (&lt;/&gt;)">
+                        <b>&lt;/&gt;</b>
+                    </button>
+
+                    <div class="toolbar-separator"></div>
+
+                    <!-- Załączniki i aparat -->
+                    <button type="button" class="toolbar-tool-btn" @onclick="CaptureWhiteboardPhotoAsync" title="Zrób zdjęcie tablicy aparatem">
+                        📷
+                    </button>
+                    <button type="button" class="toolbar-tool-btn" @onclick="PickWhiteboardPhotoAsync" title="Dodaj zdjęcie z galerii">
+                        🖼️
+                    </button>
+                    <button type="button" class="toolbar-tool-btn" @onclick="PickDocumentAsync" title="Załącz dokument PDF">
+                        📎
+                    </button>
+                        <button type="button" class="toolbar-tool-btn desktop-only-btn" @onclick="StartRemoteCameraSessionAsync" title="Aparat zdalny: Zrób zdjęcie telefonem">
+                            📱 Z telefonu
+                        </button>
+                </div>
+            </div>
+
+            <div class="editor-body-area">
+                <input type="text" class="note-title-input" placeholder='@(CurrentLang == "en-US" ? "Note Title" : "Tytuł notatki")'
+                       @bind="activeNote.Title" @bind:event="oninput" @bind:after="OnNoteTitleChanged" />
+
+                <div class="note-meta-breadcrumbs">
+                    <span>📅 @activeNote.UpdatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                    @if (!string.IsNullOrWhiteSpace(activeNote.Subject))
+                    {
+                        <span class="breadcrumb-tag">📚 @activeNote.Subject</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(activeNote.LessonType))
+                    {
+                        <span class="breadcrumb-tag">@activeNote.LessonType</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(activeNote.GroupName))
+                    {
+                        <span class="breadcrumb-tag">👥 @activeNote.GroupName</span>
+                    }
+                </div>
+
+                <!-- PASEK ZAŁĄCZONYCH DOKUMENTÓW (ZDJĘCIA SĄ BEZPOŚREDNIO W TEKŚCIE) -->
+                @{
+                    var documentAttachments = activeNote.Attachments
+                        .Where(att => !(att.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
+                                        att.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                                        att.FileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+                                        att.FileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                                        att.FileName.EndsWith(".webp", StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                }
+                @if (documentAttachments.Any())
+                {
+                    <div class="note-attachments-strip">
+                        @foreach (var att in documentAttachments)
+                        {
+                            <div class="attachment-chip" @onclick="() => OnAttachmentClick(att)">
+                                <span class="attachment-chip-icon">📄</span>
+                                <div class="attachment-chip-details">
+                                    <span class="attachment-chip-name" title="@att.FileName">@att.FileName</span>
+                                    <span class="attachment-chip-size">@WhiteboardImageOptimizer.FormatBytes(att.SizeBytes)</span>
+                                </div>
+                                <button type="button" class="attachment-chip-delete" @onclick:stopPropagation="true" @onclick="() => DeleteAttachment(att)" title="Usuń załącznik">✕</button>
+                            </div>
+                        }
+                    </div>
+                }
+
+                <!-- GŁÓWNY EDYTOR WYSIWYG -->
+                <div @ref="editorElementRef"
+                     class="notes-rich-editor"
+                     contenteditable="true"
+                     spellcheck="true"
+                     data-placeholder='@(CurrentLang == "en-US" ? "Start typing your note..." : "Zacznij pisać notatkę...")'>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="empty-editor-placeholder">
+                <span class="empty-editor-icon">📝</span>
+                <h3 style="margin: 0; font-size: 1.2rem; font-weight: 700;">@(CurrentLang == "en-US" ? "No Note Selected" : "Nie wybrano notatki")</h3>
+                <p style="margin: 0; max-width: 320px; font-size: 0.88rem;">
+                    @(CurrentLang == "en-US"
+                        ? "Select a note from the list or create a new one in the current folder."
+                        : "Wybierz notatkę z listy lub utwórz nową w wybranym folderze.")
+                </p>
+                <button class="btn btn-primary" @onclick="CreateNewNoteInSelectedFolder" style="border-radius: 9px; font-weight: 600; padding: 6px 16px; margin-top: 8px;">
+                    + @(CurrentLang == "en-US" ? "Create Note" : "Utwórz notatkę")
+                </button>
+            </div>
+        }
+    </div>
+
+    <!-- LIGHTBOX TABLICY -->
+    @if (activeLightboxAttachment != null)
+    {
+        <div class="image-lightbox-overlay" @onclick="CloseLightbox">
+            <div class="image-lightbox-dialog" @onclick:stopPropagation="true">
+                <div class="image-lightbox-header">
+                    <div class="lightbox-title-wrap">
+                        <span class="lightbox-title">@activeLightboxAttachment.FileName</span>
+                        <span class="lightbox-size">@WhiteboardImageOptimizer.FormatBytes(activeLightboxAttachment.SizeBytes)</span>
+                    </div>
+                    <div class="lightbox-actions">
+                        <button class="btn btn-sm btn-outline-light" @onclick="() => OpenAttachmentInSystem(activeLightboxAttachment)">Otwórz w systemie</button>
+                        <button class="lightbox-close-btn" @onclick="CloseLightbox">✕</button>
+                    </div>
+                </div>
+                <div class="image-lightbox-body">
+                    @if (!string.IsNullOrEmpty(lightboxImageUri))
+                    {
+                        <img src="@lightboxImageUri" class="image-lightbox-img" alt="@activeLightboxAttachment.FileName" />
+                    }
+                    else
+                    {
+                        <div style="padding: 40px; color: #fff;">Ładowanie podglądu tablicy...</div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- MODAL APARATU ZDALNEGO (CROSS-DEVICE CAMERA & WI-FI) -->
+    @if (showRemoteCameraModal)
+    {
+        <div class="remote-cam-overlay" @onclick="CloseRemoteCameraModal">
+            <div class="remote-cam-dialog" @onclick:stopPropagation="true">
+                <div class="remote-cam-header">
+                    <h4 style="margin: 0; font-size: 1.15rem; font-weight: 700;">📱 Aparat zdalny (Wi-Fi & Chmura)</h4>
+                    <button class="lightbox-close-btn" @onclick="CloseRemoteCameraModal">✕</button>
+                </div>
+                <div class="remote-cam-body">
+                    <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 14px;">
+                        Zrób zdjęcie tablicy telefonem – pojawi się bezpośrednio w treści tej notatki!
+                    </p>
+
+                    <div class="remote-cam-code-card">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 6px;">
+                            <span style="font-size: 1.2rem;">📶</span>
+                            <span style="font-size: 0.92rem; font-weight: 700; color: var(--text-main);">
+                                @(wifiServer?.EndpointUrl != null ? "Połączenie Wi-Fi aktywne" : "Połączenie chmurowe aktywne")
+                            </span>
+                        </div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); font-family: ui-monospace, Menlo, monospace;">
+                            @(wifiServer?.EndpointUrl ?? "UniAvio Cloud Sync")
+                        </div>
+                        <div style="margin-top: 10px; font-size: 0.84rem; color: var(--primary-color); font-weight: 600;">
+                            @if (isCameraWaiting)
+                            {
+                                <span>⏳ Oczekiwanie na zdjęcie z telefonu...</span>
+                            }
+                            else
+                            {
+                                <span>✓ Zdjęcie odebrane i wstawione do notatki!</span>
+                            }
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 18px; display: flex; flex-direction: column; gap: 8px;">
+                        <div style="font-size: 0.84rem; color: var(--text-muted); line-height: 1.45;">
+                            1. Otwórz UniAvio na telefonie.<br />
+                            2. Kliknij <b>"📸 Wyślij do PC"</b> – sesja łączy się <b>automatycznie</b> bez wpisywania kodów!<br />
+                            3. Zrób zdjęcie tablicy – pojawi się bezpośrednio w tekście Twojej notatki.
+                        </div>
+
+                        <div style="margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 12px; display: flex; gap: 8px; justify-content: flex-end;">
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="CaptureWhiteboardPhotoAsync">
+                                📷 Wybierz plik na komputerze
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseRemoteCameraModal">
+                                Zamknij
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- MODAL WYSYŁANIA ZDJĘCIA Z TELEFONU DO KOMPUTERA (STAŁA SESJA BEZ KODU) -->
+    @if (showPhoneTransmitModal)
+    {
+        <div class="remote-cam-overlay" @onclick="ClosePhoneTransmitModal">
+            <div class="remote-cam-dialog" @onclick:stopPropagation="true">
+                <div class="remote-cam-header">
+                    <h4 style="margin: 0; font-size: 1.15rem; font-weight: 700;">📱 Prześlij zdjęcie tablicy do PC</h4>
+                    <button class="lightbox-close-btn" @onclick="ClosePhoneTransmitModal">✕</button>
+                </div>
+                <div class="remote-cam-body">
+                    @if (isCheckingPcStatus)
+                    {
+                        <div class="remote-cam-code-card" style="margin-bottom: 16px;">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status" style="margin-bottom: 8px;"></div>
+                            <div style="font-size: 0.92rem; font-weight: 600; color: var(--text-main);">
+                                Łączenie z komputerem Mac...
+                            </div>
+                        </div>
+                    }
+                    else if (!isTargetPcOnline)
+                    {
+                        <div class="remote-cam-code-card" style="margin-bottom: 16px; border: 1px dashed rgba(255, 59, 48, 0.4); background: rgba(255, 59, 48, 0.05);">
+                            <div style="font-size: 1.5rem; margin-bottom: 4px;">💻 ✕ 📱</div>
+                            <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">
+                                Status połączenia:
+                            </span>
+                            <div style="font-size: 1.05rem; font-weight: 700; color: #ff3b30; margin-top: 2px;">
+                                Komputer jest wyłączony lub uśpiony
+                            </div>
+                            <div style="margin-top: 6px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.4;">
+                                Uruchom aplikację na Macu i wejdź w Notatki, aby połączyć.
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-primary" @onclick="OpenPhoneTransmitModal" style="margin-top: 10px; border-radius: 8px; font-weight: 600;">
+                                🔄 Sprawdź ponownie
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="remote-cam-code-card" style="margin-bottom: 16px; border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.06);">
+                            <div style="font-size: 1.5rem; margin-bottom: 4px;">💻 ➔ 📄</div>
+                            <span style="font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">
+                                Docelowa notatka na PC:
+                            </span>
+                            <div style="font-size: 1.05rem; font-weight: 700; color: var(--text-main); margin-top: 2px;">
+                                @(string.IsNullOrWhiteSpace(remoteTargetNoteTitle) ? "Nowa notatka na PC" : remoteTargetNoteTitle)
+                            </div>
+                            <div style="margin-top: 6px; font-size: 0.78rem; color: #10b981; font-weight: 600;">
+                                @(targetPcConnectionMode == "wifi" ? "⚡ Połączono bezpośrednio przez Wi-Fi (<50ms)" : "☁️ Połączono przez chmurę")
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(transmitStatusMessage))
+                    {
+                        <div style="margin-bottom: 12px; font-size: 0.86rem; text-align: center; color: var(--primary-color); font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                            @if (isTransmittingPhoto)
+                            {
+                                <div class="spinner-border spinner-border-sm text-primary" role="status" style="width: 14px; height: 14px;"></div>
+                            }
+                            <span>@transmitStatusMessage</span>
+                        </div>
+                    }
+
+                    @if (isCameraPermissionDenied)
+                    {
+                        <div style="background: rgba(255, 59, 48, 0.12); border: 1px solid rgba(255, 59, 48, 0.3); border-radius: 10px; padding: 12px; margin-bottom: 14px; text-align: center;">
+                            <p style="margin: 0 0 6px 0; font-size: 0.88rem; color: #ff3b30; font-weight: 700;">
+                                ⚠️ Brak uprawnień do aparatu w iOS
+                            </p>
+                            <p style="margin: 0 0 10px 0; font-size: 0.82rem; color: var(--text-muted); line-height: 1.4;">
+                                System iOS wymaga włączenia uprawnienia w Ustawieniach telefonu dla aplikacji UniAvio.
+                            </p>
+                            <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+                                <button type="button" class="btn btn-sm btn-danger" @onclick="OpenDeviceSettings" style="border-radius: 8px; font-weight: 600;">
+                                    ⚙️ Otwórz Ustawienia iPhone'a
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="PickAndTransmitFromGalleryAsync" style="border-radius: 8px; font-weight: 600;">
+                                    🖼️ Wybierz z galerii
+                                </button>
+                            </div>
+                        </div>
+                    }
+
+                    <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 14px;">
+                        <button type="button" class="btn btn-primary" @onclick="TransmitPhotoFromCurrentDeviceAsync" disabled="@(isTransmittingPhoto || !isTargetPcOnline || isCheckingPcStatus)" style="padding: 10px; font-weight: 700; font-size: 0.95rem; border-radius: 10px;">
+                            @(isTransmittingPhoto ? "⏳ Przesyłanie..." : "📸 Zrób i wyślij zdjęcie na PC")
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" @onclick="PickAndTransmitFromGalleryAsync" disabled="@(isTransmittingPhoto || !isTargetPcOnline || isCheckingPcStatus)" style="border-radius: 10px; font-size: 0.88rem;">
+                            🖼️ Wybierz z galerii telefonu
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private string CurrentLang = "pl-PL";
+    private List<NoteFolderNode> folderHierarchy = new();
+    private NoteFolderNode? selectedFolder;
+    private Note? activeNote;
+    private string searchQuery = "";
+    private int mobileDepth = 0; // 0 = Folders, 1 = NotesList, 2 = Editor
+
+    private ElementReference editorElementRef;
+    private DotNetObjectReference<Notes>? dotNetHelper;
+    private bool isJsInitialized = false;
+    private Guid? lastLoadedNoteId = null;
+
+    private readonly Dictionary<string, string> _thumbnailCache = new();
+    private NoteAttachment? activeLightboxAttachment;
+    private string lightboxImageUri = "";
+
+    private bool showRemoteCameraModal = false;
+    private bool isCameraWaiting = false;
+    private System.Timers.Timer? cameraPollTimer;
+
+    private bool showPhoneTransmitModal = false;
+    private string transmitStatusMessage = "";
+    private bool isTransmittingPhoto = false;
+    private bool isTargetPcOnline = false;
+    private bool isCheckingPcStatus = false;
+    private string targetPcConnectionMode = "offline"; // "wifi", "cloud", "offline"
+    private System.Timers.Timer? pcHeartbeatTimer;
+
+    private IEnumerable<Note> FilteredNotes
+    {
+        get
+        {
+            var notes = NoteService.GetAllNotes();
+
+            // Filtr wg folderu
+            if (selectedFolder != null)
+            {
+                notes = selectedFolder.FolderType switch
+                {
+                    NoteFolderType.All => notes,
+                    NoteFolderType.Pinned => notes.Where(n => n.IsPinned).ToList(),
+                    NoteFolderType.Shared => notes.Where(n => n.IsSharedWithGroup).ToList(),
+                    NoteFolderType.Uncategorized => notes.Where(n => string.IsNullOrWhiteSpace(n.Subject)).ToList(),
+                    NoteFolderType.Subject => notes.Where(n => string.Equals(n.Subject, selectedFolder.Subject, StringComparison.OrdinalIgnoreCase)).ToList(),
+                    NoteFolderType.LessonType => notes.Where(n =>
+                        string.Equals(n.Subject, selectedFolder.Subject, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(n.LessonType, selectedFolder.LessonType, StringComparison.OrdinalIgnoreCase)).ToList(),
+                    NoteFolderType.Group => notes.Where(n =>
+                        string.Equals(n.Subject, selectedFolder.Subject, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(n.LessonType, selectedFolder.LessonType, StringComparison.OrdinalIgnoreCase) &&
+                        string.Equals(n.GroupName, selectedFolder.GroupName, StringComparison.OrdinalIgnoreCase)).ToList(),
+                    _ => notes
+                };
+            }
+
+            // Filtr wg wyszukiwarki
+            if (!string.IsNullOrWhiteSpace(searchQuery))
+            {
+                var q = searchQuery.Trim();
+                notes = notes.Where(n =>
+                    (n.Title != null && n.Title.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                    (n.Content != null && n.Content.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                    (n.Subject != null && n.Subject.Contains(q, StringComparison.OrdinalIgnoreCase))
+                ).ToList();
+            }
+
+            return notes;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        CurrentLang = AppState.Language;
+        AppState.OnChange += OnAppStateChanged;
+        NoteService.OnNotesChanged += OnNotesServiceChanged;
+        ScheduleService.OnScheduleLoaded += OnScheduleServiceLoaded;
+
+        dotNetHelper = DotNetObjectReference.Create(this);
+
+        RefreshHierarchy();
+        SelectInitialFolder();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && IsDesktop)
+        {
+            _ = Task.Run(async () => await InitLocalCameraServerAsync());
+        }
+
+        if (activeNote != null)
+        {
+            try
+            {
+                if (!isJsInitialized)
+                {
+                    await JS.InvokeVoidAsync("notesEditor.init", editorElementRef, dotNetHelper);
+                    isJsInitialized = true;
+                    lastLoadedNoteId = activeNote.Id;
+                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "");
+                }
+                else if (lastLoadedNoteId != activeNote.Id)
+                {
+                    lastLoadedNoteId = activeNote.Id;
+                    await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, activeNote.Content ?? "");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Notes] JS Init/SetContent error: {ex.Message}");
+            }
+        }
+    }
+
+    private void RefreshHierarchy()
+    {
+        var scheduleData = ScheduleService.GetPreparedData();
+        folderHierarchy = NoteService.BuildFolderHierarchy(scheduleData);
+    }
+
+    private void SelectInitialFolder()
+    {
+        if (selectedFolder == null)
+        {
+            selectedFolder = folderHierarchy.FirstOrDefault(f => f.FolderType == NoteFolderType.All);
+        }
+        else
+        {
+            selectedFolder = FindNodeById(folderHierarchy, selectedFolder.Id) ?? folderHierarchy.FirstOrDefault();
+        }
+
+        var firstNote = FilteredNotes.FirstOrDefault();
+        if (activeNote == null && firstNote != null)
+        {
+            activeNote = firstNote;
+        }
+    }
+
+    private NoteFolderNode? FindNodeById(IEnumerable<NoteFolderNode> nodes, string id)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Id == id) return node;
+            var found = FindNodeById(node.Children, id);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private void SelectFolder(NoteFolderNode folder)
+    {
+        selectedFolder = folder;
+        mobileDepth = 1;
+
+        if (activeNote != null && !FilteredNotes.Any(n => n.Id == activeNote.Id))
+        {
+            activeNote = FilteredNotes.FirstOrDefault();
+            _ = UpdateEditorContentAsync();
+        }
+    }
+
+    private void ToggleFolderExpanded(NoteFolderNode node)
+    {
+        node.IsExpanded = !node.IsExpanded;
+    }
+
+    private void SelectNote(Note note)
+    {
+        if (activeNote?.Id != note.Id)
+        {
+            activeNote = note;
+            lastLoadedNoteId = null;
+            _ = UpdateEditorContentAsync();
+            _ = LoadThumbnailsForActiveNoteAsync();
+            _ = BroadcastCameraStateAsync();
+        }
+        mobileDepth = 2;
+    }
+
+    private async Task UpdateEditorContentAsync()
+    {
+        if (activeNote != null && isJsInitialized)
+        {
+            try
+            {
+                lastLoadedNoteId = activeNote.Id;
+                var displayHtml = await PrepareContentForEditorAsync(activeNote);
+                await JS.InvokeVoidAsync("notesEditor.setContent", editorElementRef, displayHtml);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Notes] UpdateEditorContentAsync error: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task<string> PrepareContentForEditorAsync(Note note)
+    {
+        if (string.IsNullOrWhiteSpace(note.Content)) return "";
+        if (!note.Content.Contains("data-attachment-id", StringComparison.OrdinalIgnoreCase)) return note.Content;
+
+        var html = note.Content;
+        if (note.Attachments != null && note.Attachments.Count > 0)
+        {
+            foreach (var att in note.Attachments)
+            {
+                if (string.IsNullOrEmpty(att.Id)) continue;
+                var uri = GetCachedThumbUri(att);
+                if (string.IsNullOrEmpty(uri))
+                {
+                    var path = !string.IsNullOrEmpty(att.ThumbnailPath) && File.Exists(att.ThumbnailPath)
+                        ? att.ThumbnailPath
+                        : att.LocalPath;
+                    if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                    {
+                        uri = await NoteService.GetAttachmentDataUriAsync(path, att.ContentType);
+                        if (!string.IsNullOrEmpty(uri))
+                        {
+                            _thumbnailCache[att.Id] = uri;
+                        }
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(uri))
+                {
+                    // Wstrzyknij src do taga z atrybutem data-attachment-id="{att.Id}"
+                    var pattern = $@"<img([^>]*\bdata-attachment-id=[""']{att.Id}[""'][^>]*)>";
+                    html = System.Text.RegularExpressions.Regex.Replace(html, pattern, m =>
+                    {
+                        var tag = m.Value;
+                        if (!tag.Contains("src=", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return tag.Insert(4, $" src=\"{uri}\"");
+                        }
+                        return System.Text.RegularExpressions.Regex.Replace(tag, @"src=""[^""]*""", $"src=\"{uri}\"");
+                    }, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                }
+            }
+        }
+        return html;
+    }
+
+    private void GoBackToFolders()
+    {
+        mobileDepth = 0;
+    }
+
+    private void GoBackToNotesList()
+    {
+        mobileDepth = 1;
+    }
+
+    private void CreateUncategorizedNote()
+    {
+        var newNote = new Note
+        {
+            Title = CurrentLang == "en-US" ? "Quick Note" : "Nowa notatka",
+            Content = "",
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now
+        };
+
+        NoteService.AddNote(newNote);
+        activeNote = newNote;
+        mobileDepth = 2;
+        _ = UpdateEditorContentAsync();
+        _ = BroadcastCameraStateAsync();
+    }
+
+    private void CreateNewNoteInSelectedFolder()
+    {
+        var newNote = new Note
+        {
+            Title = CurrentLang == "en-US" ? "New Note" : "Nowa notatka",
+            Content = "",
+            CreatedAt = DateTime.Now,
+            UpdatedAt = DateTime.Now
+        };
+
+        if (selectedFolder != null)
+        {
+            if (!string.IsNullOrWhiteSpace(selectedFolder.Subject)) newNote.Subject = selectedFolder.Subject;
+            if (!string.IsNullOrWhiteSpace(selectedFolder.LessonType)) newNote.LessonType = selectedFolder.LessonType;
+            if (!string.IsNullOrWhiteSpace(selectedFolder.GroupName)) newNote.GroupName = selectedFolder.GroupName;
+        }
+
+        NoteService.AddNote(newNote);
+        activeNote = newNote;
+        mobileDepth = 2;
+        _ = UpdateEditorContentAsync();
+        _ = BroadcastCameraStateAsync();
+    }
+
+    [JSInvokable]
+    public async Task OnEditorContentChanged(string htmlContent)
+    {
+        if (activeNote != null)
+        {
+            activeNote.Content = htmlContent;
+            await NoteService.SaveNoteAsync(activeNote);
+        }
+    }
+
+    private async Task OnNoteTitleChanged()
+    {
+        if (activeNote != null)
+        {
+            await NoteService.SaveNoteAsync(activeNote);
+            _ = BroadcastCameraStateAsync();
+        }
+    }
+
+    private async Task ExecFormat(string cmd, string? val = null)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("notesEditor.exec", cmd, val);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] ExecFormat error: {ex.Message}");
+        }
+    }
+
+    private async Task SetHeading(string tag)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("notesEditor.setHeading", tag);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] SetHeading error: {ex.Message}");
+        }
+    }
+
+    private async Task InsertChecklist()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("notesEditor.insertChecklist");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] InsertChecklist error: {ex.Message}");
+        }
+    }
+
+    private async Task InsertCodeBlock(string lang)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("notesEditor.insertCodeBlock", lang);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] InsertCodeBlock error: {ex.Message}");
+        }
+    }
+
+    private async Task TogglePinActiveNote()
+    {
+        if (activeNote != null)
+        {
+            await NoteService.TogglePinAsync(activeNote.Id);
+        }
+    }
+
+    private async Task ToggleShareActiveNote()
+    {
+        if (activeNote != null)
+        {
+            activeNote.IsSharedWithGroup = !activeNote.IsSharedWithGroup;
+            activeNote.SharedGroupCode = AppState.GroupCode;
+            await NoteService.SaveNoteAsync(activeNote);
+
+            if (!string.IsNullOrWhiteSpace(AppState.GroupCode))
+            {
+                if (activeNote.IsSharedWithGroup)
+                {
+                    await FirebaseService.ShareNoteToGroupLobbyAsync(AppState.GroupCode, activeNote);
+                }
+                else
+                {
+                    await FirebaseService.UnshareNoteFromGroupLobbyAsync(AppState.GroupCode, activeNote.Id);
+                }
+            }
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeleteActiveNote()
+    {
+        if (activeNote != null)
+        {
+            var noteToDelete = activeNote;
+            activeNote = null;
+            await NoteService.DeleteNoteAsync(noteToDelete.Id);
+            activeNote = FilteredNotes.FirstOrDefault();
+            if (activeNote == null)
+            {
+                mobileDepth = 1;
+            }
+            else
+            {
+                _ = UpdateEditorContentAsync();
+                _ = LoadThumbnailsForActiveNoteAsync();
+            }
+        }
+    }
+
+    // ==============================================================================
+    // OBSŁUGA ZAŁĄCZNIKÓW I LIGHTBOX
+    // ==============================================================================
+
+    private string GetCachedThumbUri(NoteAttachment att)
+    {
+        if (_thumbnailCache.TryGetValue(att.Id, out var uri))
+        {
+            return uri;
+        }
+
+        _ = LoadThumbnailAsync(att);
+        return "";
+    }
+
+    private async Task LoadThumbnailAsync(NoteAttachment att)
+    {
+        var path = !string.IsNullOrEmpty(att.ThumbnailPath) && File.Exists(att.ThumbnailPath)
+            ? att.ThumbnailPath
+            : att.LocalPath;
+
+        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+        {
+            var uri = await NoteService.GetAttachmentDataUriAsync(path, att.ContentType);
+            if (!string.IsNullOrEmpty(uri))
+            {
+                _thumbnailCache[att.Id] = uri;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task LoadThumbnailsForActiveNoteAsync()
+    {
+        if (activeNote?.Attachments == null) return;
+        foreach (var att in activeNote.Attachments)
+        {
+            if (!_thumbnailCache.ContainsKey(att.Id))
+            {
+                await LoadThumbnailAsync(att);
+            }
+        }
+    }
+
+    private static async Task<FileResult?> PickSinglePhotoAsync()
+    {
+        var photos = await MediaPicker.Default.PickPhotosAsync();
+        return photos?.FirstOrDefault();
+    }
+
+    private async Task CaptureWhiteboardPhotoAsync()
+    {
+        if (activeNote == null) return;
+        try
+        {
+            FileResult? photo = null;
+
+            // On macOS (MacCatalyst) or Desktop idiom:
+            // MediaPicker.CapturePhotoAsync is NOT supported by macOS UI, causing freezes or inability to cancel.
+            // Always use native FilePicker on MacCatalyst/Desktop.
+            if (DeviceInfo.Current.Platform == DevicePlatform.MacCatalyst || DeviceInfo.Current.Idiom == DeviceIdiom.Desktop)
+            {
+                photo = await FilePicker.Default.PickAsync(new PickOptions
+                {
+                    PickerTitle = CurrentLang == "en-US" ? "Select whiteboard photo" : "Wybierz zdjęcie tablicy",
+                    FileTypes = FilePickerFileType.Images
+                });
+            }
+            else
+            {
+                // Mobile platforms (iOS / Android) — muszą być wywołane na MainThread dla UIKit
+                photo = await MainThread.InvokeOnMainThreadAsync(async () =>
+                {
+                    var status = await Permissions.CheckStatusAsync<Permissions.Camera>();
+                    if (status != PermissionStatus.Granted)
+                    {
+                        status = await Permissions.RequestAsync<Permissions.Camera>();
+                    }
+
+                    if (status == PermissionStatus.Granted && MediaPicker.Default.IsCaptureSupported)
+                    {
+                        return await MediaPicker.Default.CapturePhotoAsync();
+                    }
+
+                    if (status != PermissionStatus.Granted)
+                    {
+                        bool openSettings = false;
+                        if (Application.Current?.Windows.FirstOrDefault()?.Page != null)
+                        {
+                            openSettings = await Application.Current.Windows[0].Page!.DisplayAlertAsync(
+                                CurrentLang == "en-US" ? "Camera Access Required" : "Dostęp do aparatu",
+                                CurrentLang == "en-US"
+                                    ? "UniAvio needs camera access to take whiteboard photos. Please enable Camera in iOS Settings -> UniAvio."
+                                    : "UniAvio potrzebuje dostępu do aparatu, aby robić zdjęcia tablicy. Włącz aparat w Ustawienia -> UniAvio -> Aparat.",
+                                CurrentLang == "en-US" ? "Open Settings" : "Otwórz Ustawienia",
+                                CurrentLang == "en-US" ? "Use Gallery" : "Użyj galerii"
+                            );
+                        }
+
+                        if (openSettings)
+                        {
+                            AppInfo.Current.ShowSettingsUI();
+                            return null;
+                        }
+
+                        return await PickSinglePhotoAsync();
+                    }
+
+                    return await PickSinglePhotoAsync();
+                });
+            }
+
+            if (photo != null)
+            {
+                string? dataUri = null;
+                string? attachmentId = null;
+                var fileName = photo.FileName;
+                var contentType = photo.ContentType;
+
+                byte[] photoBytes;
+                using (var rawStream = await MainThread.InvokeOnMainThreadAsync(async () => await photo.OpenReadAsync()))
+                using (var ms = new MemoryStream())
+                {
+                    await rawStream.CopyToAsync(ms);
+                    photoBytes = ms.ToArray();
+                }
+
+                await Task.Run(async () =>
+                {
+                    using var stream = new MemoryStream(photoBytes);
+                    var savedAtt = await NoteService.AddAttachmentAsync(activeNote.Id, stream, fileName, contentType);
+                    if (savedAtt != null && !string.IsNullOrEmpty(savedAtt.LocalPath))
+                    {
+                        attachmentId = savedAtt.Id;
+                        dataUri = await NoteService.GetAttachmentDataUriAsync(savedAtt.LocalPath, savedAtt.ContentType);
+                    }
+                });
+
+                if (!string.IsNullOrEmpty(dataUri) && !string.IsNullOrEmpty(attachmentId))
+                {
+                    await JS.InvokeVoidAsync("notesEditor.insertInlineImage", attachmentId, dataUri, fileName);
+                }
+                await LoadThumbnailsForActiveNoteAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
+        {
+            // Użytkownik anulował wybór zdjęcia (np. na Macu w Finderze) — czyste wyjście
+            Console.WriteLine("[Notes] Photo picking cancelled by user.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] CaptureWhiteboardPhoto error: {ex.Message}");
+        }
+    }
+
+    private async Task PickWhiteboardPhotoAsync()
+    {
+        if (activeNote == null) return;
+        try
+        {
+            FileResult? photo = null;
+            if (DeviceInfo.Current.Platform == DevicePlatform.MacCatalyst || DeviceInfo.Current.Idiom == DeviceIdiom.Desktop)
+            {
+                photo = await FilePicker.Default.PickAsync(new PickOptions
+                {
+                    PickerTitle = CurrentLang == "en-US" ? "Select photo from gallery" : "Wybierz zdjęcie z galerii",
+                    FileTypes = FilePickerFileType.Images
+                });
+            }
+            else
+            {
+                photo = await MainThread.InvokeOnMainThreadAsync(async () =>
+                {
+                    return await PickSinglePhotoAsync();
+                });
+            }
+
+            if (photo != null)
+            {
+                string? dataUri = null;
+                string? attachmentId = null;
+                var fileName = photo.FileName;
+                var contentType = photo.ContentType;
+
+                byte[] photoBytes;
+                using (var rawStream = await MainThread.InvokeOnMainThreadAsync(async () => await photo.OpenReadAsync()))
+                using (var ms = new MemoryStream())
+                {
+                    await rawStream.CopyToAsync(ms);
+                    photoBytes = ms.ToArray();
+                }
+
+                await Task.Run(async () =>
+                {
+                    using var stream = new MemoryStream(photoBytes);
+                    var savedAtt = await NoteService.AddAttachmentAsync(activeNote.Id, stream, fileName, contentType);
+                    if (savedAtt != null && !string.IsNullOrEmpty(savedAtt.LocalPath))
+                    {
+                        attachmentId = savedAtt.Id;
+                        dataUri = await NoteService.GetAttachmentDataUriAsync(savedAtt.LocalPath, savedAtt.ContentType);
+                    }
+                });
+
+                if (!string.IsNullOrEmpty(dataUri) && !string.IsNullOrEmpty(attachmentId))
+                {
+                    await JS.InvokeVoidAsync("notesEditor.insertInlineImage", attachmentId, dataUri, fileName);
+                }
+                await LoadThumbnailsForActiveNoteAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
+        {
+            // Cancelled cleanly
+            Console.WriteLine("[Notes] Photo gallery picking cancelled by user.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] PickWhiteboardPhoto error: {ex.Message}");
+        }
+    }
+
+    private async Task PickDocumentAsync()
+    {
+        if (activeNote == null) return;
+        try
+        {
+            var result = await FilePicker.Default.PickAsync(new PickOptions
+            {
+                PickerTitle = CurrentLang == "en-US" ? "Select PDF file" : "Wybierz plik PDF do notatki",
+                FileTypes = FilePickerFileType.Pdf
+            });
+            if (result != null)
+            {
+                using var stream = await result.OpenReadAsync();
+                await NoteService.AddAttachmentAsync(activeNote.Id, stream, result.FileName, result.ContentType ?? "application/pdf");
+                await LoadThumbnailsForActiveNoteAsync();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
+        {
+            // Cancelled cleanly
+            Console.WriteLine("[Notes] Document picking cancelled by user.");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] PickDocument error: {ex.Message}");
+        }
+    }
+
+    private async Task OnAttachmentClick(NoteAttachment att)
+    {
+        var isImg = att.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
+                    att.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                    att.FileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                    att.FileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase);
+
+        if (isImg)
+        {
+            activeLightboxAttachment = att;
+            lightboxImageUri = await NoteService.GetAttachmentDataUriAsync(att.LocalPath, att.ContentType);
+            StateHasChanged();
+        }
+        else
+        {
+            await OpenAttachmentInSystem(att);
+        }
+    }
+
+    private void CloseLightbox()
+    {
+        activeLightboxAttachment = null;
+        lightboxImageUri = "";
+        StateHasChanged();
+    }
+
+    private async Task OpenAttachmentInSystem(NoteAttachment att)
+    {
+        if (!string.IsNullOrEmpty(att.LocalPath) && File.Exists(att.LocalPath))
+        {
+            try
+            {
+                await Launcher.Default.OpenAsync(new OpenFileRequest
+                {
+                    File = new ReadOnlyFile(att.LocalPath)
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Notes] OpenAttachment error: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task DeleteAttachment(NoteAttachment att)
+    {
+        if (activeNote != null)
+        {
+            await NoteService.DeleteAttachmentAsync(activeNote.Id, att.Id);
+            _thumbnailCache.Remove(att.Id);
+            StateHasChanged();
+        }
+    }
+
+    // ==============================================================================
+    // APARAT ZDALNY (CROSS-DEVICE CAMERA & WI-FI DIRECT)
+    // ==============================================================================
+
+    private LocalNetworkCameraServer? wifiServer;
+    private string remoteTargetNoteTitle = "";
+    private string remoteTargetLocalEndpoint = "";
+    private string remoteTargetAuthToken = "";
+
+    private string GetCurrentStudentAlbum()
+    {
+        var album = Preferences.Default.Get("user_student_number", "");
+        if (string.IsNullOrWhiteSpace(album)) album = Preferences.Default.Get("user_album", "");
+        if (string.IsNullOrWhiteSpace(album)) album = "demo_student";
+        return album;
+    }
+
+    private async Task InitLocalCameraServerAsync()
+    {
+        if (!IsDesktop || wifiServer != null) return;
+        try
+        {
+            wifiServer = new LocalNetworkCameraServer();
+            wifiServer.OnPhotoReceived += HandlePhotoReceivedFromPhoneAsync;
+            var started = await wifiServer.StartAsync();
+            if (started)
+            {
+                await BroadcastCameraStateAsync();
+
+                pcHeartbeatTimer?.Stop();
+                pcHeartbeatTimer?.Dispose();
+                pcHeartbeatTimer = new System.Timers.Timer(8000);
+                pcHeartbeatTimer.Elapsed += async (s, e) =>
+                {
+                    try
+                    {
+                        var alb = GetCurrentStudentAlbum();
+                        await FirebaseService.UpdatePermanentRemoteCameraHeartbeatAsync(alb);
+                    }
+                    catch {}
+                };
+                pcHeartbeatTimer.AutoReset = true;
+                pcHeartbeatTimer.Start();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] InitLocalCameraServer error: {ex.Message}");
+        }
+    }
+
+    private async Task BroadcastCameraStateAsync()
+    {
+        if (!IsDesktop) return;
+        try
+        {
+            var album = GetCurrentStudentAlbum();
+            var noteId = activeNote?.Id.ToString() ?? "";
+            var noteTitle = activeNote?.Title ?? "Nowa notatka";
+            var endpoint = wifiServer?.EndpointUrl;
+            var authToken = wifiServer?.AuthToken;
+            await FirebaseService.SetPermanentRemoteCameraReadyAsync(album, noteId, noteTitle, endpoint, authToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] BroadcastCameraState error: {ex.Message}");
+        }
+    }
+
+    private async Task HandlePhotoReceivedFromPhoneAsync(byte[] bytes, string contentType)
+    {
+        try
+        {
+            if (activeNote == null)
+            {
+                await InvokeAsync(CreateUncategorizedNote);
+            }
+
+            if (activeNote != null)
+            {
+                var fileName = $"tablica_{DateTime.Now:yyyyMMdd_HHmmss}.jpg";
+                string? dataUri = null;
+                string? attachmentId = null;
+
+                await Task.Run(async () =>
+                {
+                    using var ms = new MemoryStream(bytes);
+                    // Zdjęcie z telefonu zostało już zoptymalizowane — zapis bezpośredni w <1ms
+                    var savedAtt = await NoteService.AddAttachmentAsync(activeNote.Id, ms, fileName, contentType, alreadyOptimized: true);
+                    if (savedAtt != null)
+                    {
+                        attachmentId = savedAtt.Id;
+                        var base64 = Convert.ToBase64String(bytes);
+                        dataUri = $"data:{contentType};base64,{base64}";
+                    }
+                });
+
+                if (!string.IsNullOrEmpty(dataUri) && !string.IsNullOrEmpty(attachmentId))
+                {
+                    await InvokeAsync(async () =>
+                    {
+                        await JS.InvokeVoidAsync("notesEditor.insertInlineImage", attachmentId, dataUri, fileName);
+                        showRemoteCameraModal = false;
+                        StateHasChanged();
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] HandlePhotoReceived error: {ex.Message}");
+        }
+    }
+
+    private async Task StartRemoteCameraSessionAsync()
+    {
+        if (activeNote == null) return;
+        var album = GetCurrentStudentAlbum();
+
+        await InitLocalCameraServerAsync();
+        await BroadcastCameraStateAsync();
+
+        showRemoteCameraModal = true;
+        isCameraWaiting = true;
+
+        cameraPollTimer?.Stop();
+        cameraPollTimer?.Dispose();
+        cameraPollTimer = new System.Timers.Timer(2000);
+        cameraPollTimer.Elapsed += async (s, e) => await CheckRemoteCameraUploadAsync(album, FirebaseService.PermanentCameraSessionId);
+        cameraPollTimer.AutoReset = true;
+        cameraPollTimer.Start();
+        StateHasChanged();
+    }
+
+    private async Task CheckRemoteCameraUploadAsync(string album, string sessionId)
+    {
+        try
+        {
+            var session = await FirebaseService.GetPermanentRemoteCameraSessionAsync(album);
+            if (session != null && session.Status == "uploaded" && !string.IsNullOrWhiteSpace(session.PhotoDataBase64))
+            {
+                cameraPollTimer?.Stop();
+                isCameraWaiting = false;
+
+                var bytes = Convert.FromBase64String(session.PhotoDataBase64);
+                await HandlePhotoReceivedFromPhoneAsync(bytes, session.ContentType ?? "image/jpeg");
+                await BroadcastCameraStateAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] Remote camera check error: {ex.Message}");
+        }
+    }
+
+    private void CloseRemoteCameraModal()
+    {
+        cameraPollTimer?.Stop();
+        cameraPollTimer?.Dispose();
+        cameraPollTimer = null;
+        showRemoteCameraModal = false;
+        StateHasChanged();
+    }
+
+    private bool isCameraPermissionDenied = false;
+
+    private void OpenDeviceSettings()
+    {
+        try
+        {
+            AppInfo.Current.ShowSettingsUI();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] Could not open Settings: {ex.Message}");
+        }
+    }
+
+    private async Task OpenPhoneTransmitModal()
+    {
+        isCheckingPcStatus = true;
+        isTargetPcOnline = false;
+        targetPcConnectionMode = "offline";
+        isCameraPermissionDenied = false;
+        isTransmittingPhoto = false;
+        transmitStatusMessage = "";
+        showPhoneTransmitModal = true;
+        StateHasChanged();
+
+        try
+        {
+            var album = GetCurrentStudentAlbum();
+            var session = await FirebaseService.GetPermanentRemoteCameraSessionAsync(album);
+
+            if (session == null || session.Status == "offline")
+            {
+                isTargetPcOnline = false;
+                targetPcConnectionMode = "offline";
+                remoteTargetNoteTitle = "";
+                remoteTargetLocalEndpoint = "";
+                remoteTargetAuthToken = "";
+            }
+            else
+            {
+                remoteTargetNoteTitle = !string.IsNullOrWhiteSpace(session.NoteTitle) ? session.NoteTitle : "Aktywna notatka na PC";
+                remoteTargetLocalEndpoint = session.LocalEndpoint ?? "";
+                remoteTargetAuthToken = session.AuthToken ?? "";
+
+                // Sprawdź czy heartbeat z Firebase nie jest przestarzały (np. Mac uśpiony/wyłączony > 25 sekund)
+                var isHeartbeatFresh = (DateTime.UtcNow - session.UpdatedAt) <= TimeSpan.FromSeconds(25);
+
+                // 1. Jeśli mamy endpoint Wi-Fi, wykonaj szybki ping (700ms)
+                bool wifiAlive = false;
+                if (!string.IsNullOrEmpty(remoteTargetLocalEndpoint))
+                {
+                    wifiAlive = await LocalNetworkCameraServer.PingAsync(remoteTargetLocalEndpoint);
+                }
+
+                if (wifiAlive)
+                {
+                    isTargetPcOnline = true;
+                    targetPcConnectionMode = "wifi";
+                }
+                else if (isHeartbeatFresh && session.Status == "ready")
+                {
+                    // Wi-Fi nie odpowiedziało (np. izolacja AP na uczelni), ale Mac żyje w chmurze
+                    isTargetPcOnline = true;
+                    targetPcConnectionMode = "cloud";
+                }
+                else
+                {
+                    isTargetPcOnline = false;
+                    targetPcConnectionMode = "offline";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] OpenPhoneTransmitModal error: {ex.Message}");
+            isTargetPcOnline = false;
+            targetPcConnectionMode = "offline";
+        }
+        finally
+        {
+            isCheckingPcStatus = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClosePhoneTransmitModal()
+    {
+        showPhoneTransmitModal = false;
+        StateHasChanged();
+    }
+
+    private async Task PickAndTransmitFromGalleryAsync()
+    {
+        try
+        {
+            isTransmittingPhoto = true;
+            transmitStatusMessage = "Wybieranie zdjęcia z galerii...";
+
+            FileResult? photo = null;
+            if (DeviceInfo.Current.Platform == DevicePlatform.MacCatalyst || DeviceInfo.Current.Idiom == DeviceIdiom.Desktop)
+            {
+                photo = await FilePicker.Default.PickAsync(new PickOptions
+                {
+                    PickerTitle = CurrentLang == "en-US" ? "Select photo to transmit" : "Wybierz zdjęcie do przesłania",
+                    FileTypes = FilePickerFileType.Images
+                });
+            }
+            else
+            {
+                photo = await MainThread.InvokeOnMainThreadAsync(async () =>
+                {
+                    return await PickSinglePhotoAsync();
+                });
+            }
+
+            if (photo == null)
+            {
+                isTransmittingPhoto = false;
+                transmitStatusMessage = "Anulowano wybór zdjęcia.";
+                return;
+            }
+
+            await ProcessAndUploadTransmittedPhotoAsync(photo);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
+        {
+            transmitStatusMessage = "Anulowano wybór zdjęcia.";
+        }
+        catch (Exception ex)
+        {
+            transmitStatusMessage = $"Błąd: {ex.Message}";
+        }
+        finally
+        {
+            isTransmittingPhoto = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task TransmitPhotoFromCurrentDeviceAsync()
+    {
+        try
+        {
+            isTransmittingPhoto = true;
+            transmitStatusMessage = "Otwieranie aparatu...";
+
+            FileResult? photo = null;
+
+            if (DeviceInfo.Current.Platform == DevicePlatform.MacCatalyst || DeviceInfo.Current.Idiom == DeviceIdiom.Desktop)
+            {
+                photo = await FilePicker.Default.PickAsync(new PickOptions
+                {
+                    PickerTitle = CurrentLang == "en-US" ? "Select whiteboard photo to transmit" : "Wybierz zdjęcie tablicy do przesłania",
+                    FileTypes = FilePickerFileType.Images
+                });
+            }
+            else
+            {
+                photo = await MainThread.InvokeOnMainThreadAsync(async () =>
+                {
+                    var status = await Permissions.CheckStatusAsync<Permissions.Camera>();
+                    if (status != PermissionStatus.Granted)
+                    {
+                        status = await Permissions.RequestAsync<Permissions.Camera>();
+                    }
+
+                    if (status == PermissionStatus.Granted && MediaPicker.Default.IsCaptureSupported)
+                    {
+                        isCameraPermissionDenied = false;
+                        return await MediaPicker.Default.CapturePhotoAsync();
+                    }
+
+                    if (status != PermissionStatus.Granted)
+                    {
+                        isCameraPermissionDenied = true;
+                        transmitStatusMessage = CurrentLang == "en-US"
+                            ? "Camera permission denied. Tap 'Open Settings' below."
+                            : "Brak uprawnień do aparatu. Kliknij poniżej, aby otworzyć Ustawienia.";
+                        await InvokeAsync(StateHasChanged);
+                        return null;
+                    }
+
+                    return await PickSinglePhotoAsync();
+                });
+            }
+
+            if (photo == null)
+            {
+                isTransmittingPhoto = false;
+                if (!isCameraPermissionDenied)
+                {
+                    transmitStatusMessage = "Anulowano robienie zdjęcia.";
+                }
+                return;
+            }
+
+            await ProcessAndUploadTransmittedPhotoAsync(photo);
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or TaskCanceledException)
+        {
+            transmitStatusMessage = "Anulowano robienie zdjęcia.";
+        }
+        catch (Exception ex)
+        {
+            transmitStatusMessage = $"Błąd: {ex.Message}";
+        }
+        finally
+        {
+            isTransmittingPhoto = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProcessAndUploadTransmittedPhotoAsync(FileResult photo)
+    {
+        isTransmittingPhoto = true;
+        transmitStatusMessage = "Przygotowywanie tablicy...";
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
+        var tempTarget = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}.jpg");
+        var tempThumb = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid():N}_thumb.jpg");
+
+        try
+        {
+            // KROK 1: Bezpieczny odczyt bajtów na MainThread (na iOS odczyt strumienia z FileResult wymaga wątku UI)
+            byte[] photoBytes;
+            using (var rawStream = await MainThread.InvokeOnMainThreadAsync(async () => await photo.OpenReadAsync()))
+            using (var ms = new MemoryStream())
+            {
+                await rawStream.CopyToAsync(ms);
+                photoBytes = ms.ToArray();
+            }
+
+            await InvokeAsync(() =>
+            {
+                transmitStatusMessage = "Optymalizacja tablicy...";
+                StateHasChanged();
+            });
+
+            // KROK 2: Sprzętowa optymalizacja tablicy (WhiteboardImageOptimizer)
+            using (var inStream = new MemoryStream(photoBytes))
+            {
+                await WhiteboardImageOptimizer.OptimizeAndSaveAsync(inStream, tempTarget, tempThumb);
+            }
+
+            // KROK 3: Bezpieczne asynchroniczne przesyłanie sieciowe w tle (Task.Run)
+            await Task.Run(async () =>
+            {
+                var bytes = await File.ReadAllBytesAsync(tempTarget);
+                var base64 = Convert.ToBase64String(bytes);
+
+                // Krok 3a: Próba przesłania bezpośrednio przez Wi-Fi (jeśli w jednej sieci)
+                if (!string.IsNullOrEmpty(remoteTargetLocalEndpoint) && isTargetPcOnline && targetPcConnectionMode == "wifi")
+                {
+                    await InvokeAsync(() =>
+                    {
+                        transmitStatusMessage = "⚡ Błyskawiczne przesyłanie przez Wi-Fi...";
+                        StateHasChanged();
+                    });
+
+                    var wifiSuccess = await LocalNetworkCameraServer.SendPhotoOverWifiAsync(remoteTargetLocalEndpoint, base64, "image/jpeg", remoteTargetAuthToken);
+                    if (wifiSuccess)
+                    {
+                        await InvokeAsync(() =>
+                        {
+                            transmitStatusMessage = "Przesłano błyskawicznie przez Wi-Fi! ✓";
+                            StateHasChanged();
+                        });
+                        await Task.Delay(800);
+                        await InvokeAsync(() =>
+                        {
+                            showPhoneTransmitModal = false;
+                            StateHasChanged();
+                        });
+                        return;
+                    }
+                }
+
+                // Krok 3b: Fallback na stałą sesję w chmurze Firebase (jeśli Wi-Fi P2P niedostępne)
+                await InvokeAsync(() =>
+                {
+                    transmitStatusMessage = "☁️ Przesyłanie przez chmurę...";
+                    StateHasChanged();
+                });
+
+                var album = GetCurrentStudentAlbum();
+                var success = await FirebaseService.UploadRemoteCameraPhotoAsync(album, FirebaseService.PermanentCameraSessionId, base64, "image/jpeg");
+
+                if (success)
+                {
+                    await InvokeAsync(() =>
+                    {
+                        transmitStatusMessage = "Zdjęcie pomyślnie wysłane do komputera! ✓";
+                        StateHasChanged();
+                    });
+                    await Task.Delay(800);
+                    await InvokeAsync(() =>
+                    {
+                        showPhoneTransmitModal = false;
+                        StateHasChanged();
+                    });
+                }
+                else
+                {
+                    await InvokeAsync(() =>
+                    {
+                        transmitStatusMessage = "Błąd wysyłania: Upewnij się, że komputer ma otwartą aplikację.";
+                        StateHasChanged();
+                    });
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            transmitStatusMessage = $"Błąd przesyłania: {ex.Message}";
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            try { if (File.Exists(tempTarget)) File.Delete(tempTarget); } catch {}
+            try { if (File.Exists(tempThumb)) File.Delete(tempThumb); } catch {}
+            isTransmittingPhoto = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnInlineImageClicked(string imageRef)
+    {
+        if (activeNote?.Attachments != null && activeNote.Attachments.Count > 0)
+        {
+            var matchedAtt = activeNote.Attachments.FirstOrDefault(a => a.Id == imageRef);
+            if (matchedAtt != null)
+            {
+                await OnAttachmentClick(matchedAtt);
+                return;
+            }
+        }
+
+        lightboxImageUri = imageRef;
+        activeLightboxAttachment = new NoteAttachment
+        {
+            FileName = "Zdjęcie w tekście",
+            ContentType = "image/jpeg"
+        };
+        StateHasChanged();
+    }
+
+    // ==============================================================================
+    // POMOCNICZE FORMATOWANIE I CYKL ŻYCIA
+    // ==============================================================================
+
+    private static string GetCleanSnippet(string? html)
+    {
+        if (string.IsNullOrWhiteSpace(html)) return "Brak dodatkowego tekstu";
+        // Bierzemy maksymalnie pierwsze 400 znaków HTML-a — snippet ma 1-2 linijki!
+        // Zapobiega to zamrażaniu CPU przez Regex przy dużych obrazach base64
+        var truncated = html.Length > 400 ? html.Substring(0, 400) : html;
+        var plain = System.Text.RegularExpressions.Regex.Replace(truncated, "<.*?>", " ");
+        plain = System.Net.WebUtility.HtmlDecode(plain).Trim();
+        if (string.IsNullOrWhiteSpace(plain)) return "Brak tekstu";
+        return plain.Length > 70 ? plain.Substring(0, 70) + "…" : plain;
+    }
+
+    private static string FormatNoteDate(DateTime date)
+    {
+        var now = DateTime.Now;
+        if (date.Date == now.Date) return date.ToString("HH:mm");
+        if (date.Date == now.Date.AddDays(-1)) return "Wczoraj";
+        if (date.Year == now.Year) return date.ToString("dd.MM");
+        return date.ToString("dd.MM.yyyy");
+    }
+
+    private static string FormatShortBadge(string subject, string? type, string? group)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(subject))
+        {
+            var shortSubj = subject.Length > 12 ? subject.Substring(0, 10) + "…" : subject;
+            parts.Add(shortSubj);
+        }
+        if (!string.IsNullOrWhiteSpace(type)) parts.Add(type);
+        if (!string.IsNullOrWhiteSpace(group)) parts.Add(group);
+        return string.Join(" • ", parts);
+    }
+
+    private void OnAppStateChanged()
+    {
+        CurrentLang = AppState.Language;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnNotesServiceChanged()
+    {
+        InvokeAsync(() =>
+        {
+            RefreshHierarchy();
+            StateHasChanged();
+        });
+    }
+
+    private void OnScheduleServiceLoaded()
+    {
+        InvokeAsync(() =>
+        {
+            RefreshHierarchy();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        AppState.OnChange -= OnAppStateChanged;
+        NoteService.OnNotesChanged -= OnNotesServiceChanged;
+        ScheduleService.OnScheduleLoaded -= OnScheduleServiceLoaded;
+        dotNetHelper?.Dispose();
+
+        if (cameraPollTimer != null)
+        {
+            cameraPollTimer.Stop();
+            cameraPollTimer.Dispose();
+            cameraPollTimer = null;
+        }
+
+        if (pcHeartbeatTimer != null)
+        {
+            pcHeartbeatTimer.Stop();
+            pcHeartbeatTimer.Dispose();
+            pcHeartbeatTimer = null;
+        }
+
+        wifiServer?.Dispose();
+        wifiServer = null;
+
+        if (IsDesktop)
+        {
+            var alb = GetCurrentStudentAlbum();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await FirebaseService.SetPermanentRemoteCameraOfflineAsync(alb);
+                }
+                catch {}
+            });
+        }
+    }
+    
+   
+        // Sprawdza czy urządzenie to telefon
+        private bool IsPhone => DeviceInfo.Current.Idiom == DeviceIdiom.Phone;
+        // Albo czy to komputer (Desktop / MacCatalyst / Windows)
+        private bool IsDesktop => DeviceInfo.Current.Idiom == DeviceIdiom.Desktop 
+                                  || DeviceInfo.Current.Platform == DevicePlatform.MacCatalyst
+                                  || DeviceInfo.Current.Platform == DevicePlatform.WinUI;
+    
+}

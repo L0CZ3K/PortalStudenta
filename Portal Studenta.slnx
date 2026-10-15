@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Portal Studenta/Portal Studenta.csproj">
+    <Deploy Solution="Debug|*" />
+  </Project>
+  <Project Path="PortalStudenta.Tests/PortalStudenta.Tests.csproj" />
+</Solution>

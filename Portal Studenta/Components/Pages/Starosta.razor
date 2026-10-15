@@ -1,0 +1,2148 @@
+@page "/admin"
+@page "/starosta"
+@using Portal_Studenta.Models
+@using Portal_Studenta.Services
+@inject Portal_Studenta.Services.ScheduleService ScheduleService
+@inject Portal_Studenta.Services.AnnouncementService AnnouncementService
+@inject Portal_Studenta.Services.AppState AppState
+@inject Portal_Studenta.Services.FirebaseService FirebaseService
+@implements IDisposable
+
+<style>
+    .starosta-container {
+        max-width: 960px;
+        margin: 0 auto;
+        padding-bottom: 60px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .starosta-container * {
+        box-sizing: border-box;
+    }
+
+    /* HEADER & STATS */
+    .starosta-header {
+        margin-bottom: 24px;
+        width: 100%;
+    }
+    .starosta-title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 14px;
+        margin-bottom: 6px;
+        width: 100%;
+    }
+    .starosta-title {
+        color: var(--color-starosta);
+        margin: 0;
+        font-size: 1.85rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        letter-spacing: -0.02em;
+        min-width: 0;
+    }
+    .starosta-subtitle {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        margin: 0 0 16px 0;
+        line-height: 1.5;
+    }
+
+    .starosta-stats-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .stat-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        padding: 6px 12px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+        font-weight: 500;
+    }
+    .stat-badge strong {
+        color: var(--text-main);
+        font-weight: 700;
+    }
+
+    /* MAIN TABS */
+    .starosta-tabs {
+        display: flex;
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border-color);
+        padding: 5px;
+        border-radius: 14px;
+        margin-bottom: 22px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        flex-wrap: nowrap;
+    }
+    .starosta-tabs::-webkit-scrollbar {
+        display: none;
+    }
+    .tab-btn {
+        flex: 1;
+        min-width: 130px;
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        padding: 10px 14px;
+        border-radius: 10px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: all var(--transition);
+        white-space: nowrap;
+    }
+    .tab-btn:hover {
+        color: var(--text-main);
+        background: rgba(255, 255, 255, 0.04);
+    }
+    .tab-btn.active {
+        background: var(--card-bg-elevated);
+        color: var(--text-main);
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    }
+    .tab-btn.active.tab-schedule {
+        color: #FF9F0A;
+        border: 1px solid rgba(255, 159, 10, 0.3);
+    }
+    .tab-btn.active.tab-announcements {
+        color: #0A84FF;
+        border: 1px solid rgba(10, 132, 255, 0.3);
+    }
+    .tab-btn.active.tab-polls {
+        color: #BF5AF2;
+        border: 1px solid rgba(191, 90, 242, 0.3);
+    }
+    .tab-btn.active.tab-settings {
+        color: #30D158;
+        border: 1px solid rgba(48, 209, 88, 0.3);
+    }
+
+    /* SUB-ACTION PILLS FOR SCHEDULE */
+    .schedule-subactions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 20px;
+    }
+    .action-pill {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        padding: 9px 16px;
+        border-radius: 10px;
+        font-size: 0.88rem;
+        font-weight: 600;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        transition: all var(--transition);
+    }
+    .action-pill:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-main);
+    }
+    .action-pill.active.cancel {
+        background: rgba(255, 69, 58, 0.15);
+        border-color: rgba(255, 69, 58, 0.45);
+        color: var(--danger-color);
+    }
+    .action-pill.active.move {
+        background: rgba(255, 159, 10, 0.15);
+        border-color: rgba(255, 159, 10, 0.45);
+        color: var(--color-starosta);
+    }
+    .action-pill.active.room {
+        background: rgba(10, 132, 255, 0.15);
+        border-color: rgba(10, 132, 255, 0.45);
+        color: var(--primary-color);
+    }
+    .action-pill.active.custom {
+        background: rgba(191, 90, 242, 0.15);
+        border-color: rgba(191, 90, 242, 0.45);
+        color: #BF5AF2;
+    }
+
+    /* CARDS */
+    .starosta-card {
+        background: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius);
+        padding: 24px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.18);
+        position: relative;
+        overflow: hidden;
+    }
+    .starosta-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 4px;
+        height: 100%;
+        background: var(--card-accent, var(--color-starosta));
+    }
+    .starosta-card-header {
+        margin-bottom: 20px;
+    }
+    .starosta-card-title {
+        margin: 0;
+        font-size: 1.25rem;
+        font-weight: 700;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--text-main);
+    }
+    .starosta-card-desc {
+        color: var(--text-muted);
+        font-size: 0.88rem;
+        margin: 6px 0 0 0;
+        line-height: 1.5;
+    }
+
+    /* FORM ELEMENTS & INPUT STYLING (DARK MODE FIX) */
+    .form-group {
+        margin-bottom: 18px;
+    }
+    .form-label {
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+        margin-bottom: 7px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+    .starosta-container input[type="text"],
+    .starosta-container input[type="date"],
+    .starosta-container input[type="time"],
+    .starosta-container input[type="datetime-local"],
+    .starosta-container select,
+    .starosta-container textarea {
+        color-scheme: dark;
+        width: 100%;
+        box-sizing: border-box;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border-color);
+        padding: 11px 14px;
+        border-radius: 10px;
+        color: var(--text-main);
+        font-size: 0.95rem;
+        font-family: inherit;
+        transition: border-color var(--transition), box-shadow var(--transition);
+    }
+    .starosta-container input:focus,
+    .starosta-container select:focus,
+    .starosta-container textarea:focus {
+        outline: none;
+        border-color: var(--color-starosta);
+        box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.15);
+    }
+
+    .form-row-2 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+        margin-bottom: 16px;
+        width: 100%;
+    }
+    .form-row-3 {
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+        gap: 16px;
+        margin-bottom: 16px;
+        width: 100%;
+    }
+    .form-row-2 > div, .form-row-3 > div {
+        min-width: 0;
+    }
+    @@media (max-width: 820px) {
+        .form-row-3 {
+            grid-template-columns: 1fr !important;
+            gap: 12px;
+        }
+    }
+    @@media (max-width: 680px) {
+        .form-row-2 {
+            grid-template-columns: 1fr !important;
+            gap: 12px;
+        }
+        .starosta-card {
+            padding: 16px;
+            border-radius: 16px;
+        }
+        .starosta-container {
+            padding-bottom: calc(100px + env(safe-area-inset-bottom, 20px));
+        }
+        .starosta-title {
+            font-size: 1.55rem;
+        }
+        .starosta-subtitle {
+            font-size: 0.88rem;
+            margin-bottom: 12px;
+        }
+        .tab-btn {
+            min-width: unset !important;
+            flex: 0 0 auto !important;
+            padding: 8px 12px !important;
+            font-size: 0.82rem !important;
+            gap: 6px !important;
+        }
+        .schedule-subactions {
+            display: grid !important;
+            grid-template-columns: 1fr 1fr !important;
+            gap: 8px !important;
+        }
+        .action-pill {
+            justify-content: center !important;
+            padding: 10px 8px !important;
+            font-size: 0.82rem !important;
+            white-space: nowrap !important;
+            text-align: center !important;
+        }
+        .selected-lesson-card {
+            padding: 12px 14px !important;
+        }
+        .lesson-meta-title {
+            font-size: 0.95rem !important;
+        }
+        .lesson-meta-details {
+            font-size: 0.8rem !important;
+            gap: 6px !important;
+        }
+    }
+
+    /* SEARCHABLE LESSON SELECTOR */
+    .lesson-picker-box {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 20px;
+    }
+    .search-input-wrap {
+        position: relative;
+        margin-bottom: 10px;
+    }
+    .search-input-wrap input {
+        padding-left: 38px !important;
+    }
+    .search-icon-left {
+        position: absolute;
+        left: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+        pointer-events: none;
+        font-size: 1rem;
+    }
+    .search-clear-btn {
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: transparent;
+        border: none;
+        color: var(--text-muted);
+        cursor: pointer;
+        padding: 4px;
+        font-size: 0.9rem;
+    }
+
+    .filter-pills-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 4px;
+        margin-bottom: 14px;
+    }
+    .filter-pills-row::-webkit-scrollbar {
+        display: none;
+    }
+    .filter-pill {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border-color);
+        color: var(--text-muted);
+        padding: 5px 12px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    .filter-pill:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-main);
+    }
+    .filter-pill.active {
+        background: rgba(255, 255, 255, 0.15);
+        color: var(--text-main);
+        font-weight: 700;
+        border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    /* SELECTED LESSON PREVIEW CARD */
+    .selected-lesson-card {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 12px;
+        padding: 14px 16px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+        transition: border-color var(--transition);
+    }
+    .selected-lesson-card.highlight {
+        border-color: var(--color-starosta);
+        background: rgba(255, 159, 10, 0.05);
+    }
+    .lesson-meta-title {
+        font-weight: 700;
+        font-size: 1.02rem;
+        color: var(--text-main);
+        margin: 0 0 4px 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .lesson-meta-details {
+        font-size: 0.84rem;
+        color: var(--text-secondary);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .lesson-type-badge {
+        padding: 2px 7px;
+        border-radius: 6px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+    }
+    .badge-W { background: rgba(10, 132, 255, 0.2); color: #0A84FF; }
+    .badge-C { background: rgba(255, 159, 10, 0.2); color: #FF9F0A; }
+    .badge-L { background: rgba(48, 209, 88, 0.2); color: #30D158; }
+    .badge-P { background: rgba(191, 90, 242, 0.2); color: #BF5AF2; }
+    .badge-STAR { background: rgba(255, 214, 10, 0.2); color: #FFD60A; }
+
+    /* LESSON RESULTS LIST (SEARCH DROPDOWN) */
+    .lesson-results-list {
+        max-height: 250px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        border: 1px solid var(--border-color);
+        background: rgba(15, 18, 26, 0.85);
+        border-radius: 10px;
+        padding: 8px;
+        margin-bottom: 12px;
+    }
+    .lesson-item-row {
+        padding: 10px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid transparent;
+        transition: all 0.15s ease;
+    }
+    .lesson-item-row:hover {
+        background: rgba(255, 255, 255, 0.07);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    .lesson-item-row.active {
+        background: rgba(255, 159, 10, 0.12);
+        border-color: rgba(255, 159, 10, 0.4);
+    }
+
+    /* ACTION BUTTONS */
+    .btn-action {
+        width: 100%;
+        font-weight: 600;
+        padding: 13px 18px;
+        border-radius: 10px;
+        margin-top: 14px;
+        font-size: 0.95rem;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    .btn-action:hover {
+        opacity: 0.92;
+    }
+    .btn-action:active {
+        transform: scale(0.98);
+    }
+
+    /* PRIORITY TOGGLE BOX */
+    .priority-card {
+        background: rgba(255, 69, 58, 0.06);
+        border: 1px solid rgba(255, 69, 58, 0.25);
+        border-radius: 10px;
+        padding: 12px 16px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.15s ease;
+    }
+    .priority-card:hover {
+        background: rgba(255, 69, 58, 0.1);
+    }
+    .priority-card input[type="checkbox"] {
+        width: 22px;
+        height: 22px;
+        accent-color: var(--danger-color);
+        cursor: pointer;
+        flex-shrink: 0;
+    }
+</style>
+
+@if (!AppState.HasManagementPrivileges)
+{
+    <div class="starosta-container" style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 3.5rem; margin-bottom: 16px;">🛡️</div>
+        <h2 style="color: var(--danger-color); font-weight: 700; margin-bottom: 10px;">
+            @(CurrentLang == "en-US" ? "Access Denied" : "Dostęp zablokowany")
+        </h2>
+        <p style="color: var(--text-muted); max-width: 520px; margin: 0 auto 24px auto; line-height: 1.6;">
+            @(CurrentLang == "en-US" 
+                ? "This section requires Starosta or Group Administrator privileges. If you are a student, please contact your group representative." 
+                : "Ta sekcja wymaga uprawnień Starosty lub Administratora grupy. Jeśli jesteś studentem, skontaktuj się ze starostą swojego roku.")
+        </p>
+        <a href="/" class="btn btn-secondary" style="display: inline-block; padding: 10px 24px; border-radius: 12px; text-decoration: none; font-weight: 600;">
+            @(CurrentLang == "en-US" ? "Return to Dashboard" : "Wróć do planu")
+        </a>
+    </div>
+}
+else
+{
+    <div class="starosta-container">
+        <!-- GŁÓWNY NAGŁÓWEK -->
+    <div class="starosta-header">
+        <div class="starosta-title-row">
+            <h1 class="starosta-title" style="color: @(AppState.IsStarosta ? "var(--color-starosta)" : "var(--danger-color)");">
+                <span>@(AppState.IsStarosta ? "👑" : "🛡️")</span>
+                @(AppState.IsStarosta 
+                    ? (CurrentLang == "en-US" ? "Starosta Dashboard" : "Panel Starosty") 
+                    : (CurrentLang == "en-US" ? "Admin Dashboard" : "Panel Administratora"))
+            </h1>
+
+            <div class="starosta-stats-row">
+                @if (!string.IsNullOrEmpty(AppState.GroupCode))
+                {
+                    <span class="stat-badge">
+                        🔑 @(CurrentLang == "en-US" ? "Room" : "Pokój"): <strong>@AppState.GroupCode</strong>
+                    </span>
+                }
+                <span class="stat-badge">
+                    🗳️ @(CurrentLang == "en-US" ? "Polls" : "Ankiety"): <strong>@GroupPolls.Count(p => !p.IsClosed)</strong>
+                </span>
+            </div>
+        </div>
+        <p class="starosta-subtitle">
+            @(AppState.IsStarosta 
+                ? (CurrentLang == "en-US" ? "Centrally manage timetable adjustments, instant announcements, cohort polls, and group administration." : "Zarządzaj zmianami w planie, ogłoszeniami, ankietami roku oraz kodem pokoju w jednym miejscu.")
+                : (CurrentLang == "en-US" ? "Manage timetable adjustments and announcements for your group." : "Zarządzaj zmianami w planie zajęć i ogłoszeniami dla swojej grupy."))
+        </p>
+    </div>
+
+    <!-- ZAKŁADKI KATEGORII -->
+    <div class="starosta-tabs">
+        <button class="tab-btn tab-schedule @(activeTab == "schedule" ? "active" : "")" @onclick='() => SetTab("schedule")'>
+            📅 @(CurrentLang == "en-US" ? "Timetable" : "Harmonogram")
+        </button>
+        <button class="tab-btn tab-announcements @(activeTab == "announcements" ? "active" : "")" @onclick='() => SetTab("announcements")'>
+            📣 @(CurrentLang == "en-US" ? "Announcements" : "Komunikaty")
+        </button>
+        <button class="tab-btn tab-polls @(activeTab == "polls" ? "active" : "")" @onclick='() => SetTab("polls")'>
+            🗳️ @(CurrentLang == "en-US" ? "Polls & Votes" : "Ankiety grupy")
+            @if (GroupPolls.Any(p => !p.IsClosed))
+            {
+                <span style="background: #BF5AF2; color: #fff; font-size: 0.72rem; padding: 1px 6px; border-radius: 999px; font-weight: 700;">
+                    @GroupPolls.Count(p => !p.IsClosed)
+                </span>
+            }
+        </button>
+        @if (AppState.IsStarosta)
+        {
+            <button class="tab-btn tab-settings @(activeTab == "settings" ? "active" : "")" @onclick='() => SetTab("settings")'>
+                ⚙️ @(CurrentLang == "en-US" ? "Lobby & Admins" : "Lobby & Uprawnienia")
+            </button>
+        }
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- ZAKŁADKA 1: HARMONOGRAM ZAJĘĆ                            -->
+    <!-- ======================================================== -->
+    @if (activeTab == "schedule")
+    {
+        <!-- Pod-akcje dla harmonogramu -->
+        <div class="schedule-subactions">
+            <button class="action-pill @(scheduleAction == "cancel" ? "active cancel" : "")" @onclick='() => SetScheduleAction("cancel")'>
+                🚫 @(CurrentLang == "en-US" ? "Cancel Class" : "Odwołaj zajęcia")
+            </button>
+            <button class="action-pill @(scheduleAction == "move" ? "active move" : "")" @onclick='() => SetScheduleAction("move")'>
+                ⏰ @(CurrentLang == "en-US" ? "Reschedule Class" : "Przełóż termin")
+            </button>
+            <button class="action-pill @(scheduleAction == "room" ? "active room" : "")" @onclick='() => SetScheduleAction("room")'>
+                📍 @(CurrentLang == "en-US" ? "Change Room" : "Zmień salę")
+            </button>
+            <button class="action-pill @(scheduleAction == "custom" ? "active custom" : "")" @onclick='() => SetScheduleAction("custom")'>
+                ➕ @(CurrentLang == "en-US" ? "Add Cohort Event" : "Nowe wydarzenie")
+            </button>
+        </div>
+
+        @if (scheduleAction != "custom")
+        {
+            <!-- WYSZUKIWARKA I INTELIGENTNY WYBÓR ZAJĘĆ -->
+            <div class="lesson-picker-box">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <span style="font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);">
+                        🔍 @(CurrentLang == "en-US" ? "Select Target Class" : "Wybierz zajęcia do modyfikacji")
+                    </span>
+                    <button type="button" class="btn btn-secondary" style="font-size: 0.78rem; padding: 4px 10px; min-height: unset; border-radius: 6px;" @onclick="ToggleLessonList">
+                        @(isLessonListOpen ? (CurrentLang == "en-US" ? "Hide List ▲" : "Zwiń listę ▲") : (CurrentLang == "en-US" ? "Show All ▼" : "Rozwiń listę ▼"))
+                    </button>
+                </div>
+
+                <!-- Wyszukiwarka tekstowa -->
+                <div class="search-input-wrap">
+                    <span class="search-icon-left">🔍</span>
+                    <input type="text" placeholder='@(CurrentLang == "en-US" ? "Search by title, room, lecturer, day (e.g. Math, 122, Monday)..." : "Szukaj po nazwie, sali, prowadzącym lub dniu (np. Arytmetyka, 122, poniedziałek)...")'
+                           @bind="lessonSearchQuery" @bind:event="oninput" @onfocus="() => isLessonListOpen = true" />
+                    @if (!string.IsNullOrEmpty(lessonSearchQuery))
+                    {
+                        <button class="search-clear-btn" @onclick="ClearSearch">✕</button>
+                    }
+                </div>
+
+                <!-- Szybkie filtry dni -->
+                <div class="filter-pills-row">
+                    <button class="filter-pill @(lessonFilterDay == "all" ? "active" : "")" @onclick='() => SetLessonDayFilter("all")'>
+                        @(CurrentLang == "en-US" ? "All Days" : "Wszystkie dni")
+                    </button>
+                    <button class="filter-pill @(lessonFilterDay == "today" ? "active" : "")" @onclick='() => SetLessonDayFilter("today")'>
+                        @(CurrentLang == "en-US" ? "Today" : "Dzisiaj")
+                    </button>
+                    <button class="filter-pill @(lessonFilterDay == "tomorrow" ? "active" : "")" @onclick='() => SetLessonDayFilter("tomorrow")'>
+                        @(CurrentLang == "en-US" ? "Tomorrow" : "Jutro")
+                    </button>
+                    <button class="filter-pill @(lessonFilterDay == "this_week" ? "active" : "")" @onclick='() => SetLessonDayFilter("this_week")'>
+                        @(CurrentLang == "en-US" ? "This Week" : "Ten tydzień")
+                    </button>
+                </div>
+
+                <!-- Lista wyników wyszukiwania (rozwijana) -->
+                @if (isLessonListOpen)
+                {
+                    <div class="lesson-results-list">
+                        @if (FilteredLessons.Any())
+                        {
+                            @foreach (var l in FilteredLessons)
+                            {
+                                bool isSelected = selectedLesson != null && ScheduleService.GetLessonKey(selectedLesson) == ScheduleService.GetLessonKey(l);
+                                <div class="lesson-item-row @(isSelected ? "active" : "")" @onclick="() => SelectLesson(l)">
+                                    <div style="display: flex; flex-direction: column; gap: 3px; overflow: hidden; flex: 1; min-width: 0;">
+                                        <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+                                            <span class="lesson-type-badge badge-@l.Type" style="flex-shrink: 0;">@l.Type</span>
+                                            <strong style="color: var(--text-main); font-size: 0.92rem; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; min-width: 0;">
+                                                @l.Title
+                                            </strong>
+                                            @if (l.IsCanceled)
+                                            {
+                                                <span style="color: var(--danger-color); font-size: 0.75rem; font-weight: 700; flex-shrink: 0;">[ODWOŁANE]</span>
+                                            }
+                                        </div>
+                                        <div style="font-size: 0.78rem; color: var(--text-muted); display: flex; flex-wrap: wrap; gap: 10px;">
+                                            <span>📅 @l.Start.ToString("dd.MM (ddd) HH:mm")</span>
+                                            <span>📍 @l.Place</span>
+                                            <span>👥 Gr: @l.Group</span>
+                                        </div>
+                                    </div>
+                                    <div style="font-size: 1.1rem; color: @(isSelected ? "var(--color-starosta)" : "var(--text-muted)"); flex-shrink: 0; margin-left: 8px;">
+                                        @(isSelected ? "✓" : "→")
+                                    </div>
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 0.88rem;">
+                                @(CurrentLang == "en-US" ? "No matching classes found." : "Nie znaleziono pasujących zajęć.")
+                            </div>
+                        }
+                    </div>
+                }
+
+                <!-- Podgląd aktualnie wybranych zajęć -->
+                @if (selectedLesson != null)
+                {
+                    <div class="selected-lesson-card highlight">
+                        <div style="flex: 1; min-width: 0; overflow: hidden;">
+                            <div class="lesson-meta-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                <span class="lesson-type-badge badge-@selectedLesson.Type" style="flex-shrink: 0;">@selectedLesson.Type</span>
+                                <span style="overflow: hidden; text-overflow: ellipsis;">@selectedLesson.Title</span>
+                                @if (selectedLesson.IsCanceled)
+                                {
+                                    <span style="color: var(--danger-color); font-size: 0.8rem; font-weight: 700; flex-shrink: 0;">🚫 [ODWOŁANE]</span>
+                                }
+                            </div>
+                            <div class="lesson-meta-details">
+                                <span>📅 <strong>@selectedLesson.Start.ToString("dddd, dd.MM.yyyy", new System.Globalization.CultureInfo(CurrentLang))</strong></span>
+                                <span>⏰ <strong>@selectedLesson.Start.ToString("HH:mm") – @selectedLesson.End.ToString("HH:mm")</strong></span>
+                                <span>📍 Sala: <strong>@selectedLesson.Place</strong></span>
+                                <span>👥 Grupa: <strong>@selectedLesson.Group</strong></span>
+                                @if (!string.IsNullOrEmpty(selectedLesson.Person))
+                                {
+                                    <span>👤 <strong>@selectedLesson.Person</strong></span>
+                                }
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-secondary" style="font-size: 0.8rem; padding: 6px 12px; min-height: unset; white-space: nowrap; flex-shrink: 0; margin-left: 10px;" @onclick="() => isLessonListOpen = !isLessonListOpen">
+                            🔁 @(CurrentLang == "en-US" ? "Change" : "Zmień")
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div style="padding: 14px; background: rgba(255, 69, 58, 0.08); border: 1px dashed rgba(255, 69, 58, 0.3); border-radius: 10px; color: var(--danger-color); font-size: 0.88rem; text-align: center;">
+                        ⚠️ @(CurrentLang == "en-US" ? "No class selected. Click above to pick a class." : "Brak wybranych zajęć. Rozwiń listę powyżej, aby wybrać przedmiot.")
+                    </div>
+                }
+            </div>
+        }
+
+        <!-- AKCJA 1: ODWOŁAJ ZAJĘCIA -->
+        @if (scheduleAction == "cancel")
+        {
+            <div class="starosta-card" style="--card-accent: var(--danger-color);">
+                <div class="starosta-card-header">
+                    <h2 class="starosta-card-title" style="color: var(--danger-color);">
+                        <span>🚫</span> @(CurrentLang == "en-US" ? "Cancel Selected Class" : "Odwołaj wybrane zajęcia")
+                    </h2>
+                    <p class="starosta-card-desc">
+                        @(CurrentLang == "en-US" ? "Cancellation will be immediately synchronized in cloud calendars of all students." : "Odwołanie zostanie natychmiast rozpropagowane w kalendarzach chmurowych wszystkich studentów.")
+                    </p>
+                </div>
+
+                @if (selectedLesson != null && selectedLesson.IsCanceled)
+                {
+                    <div style="background: rgba(255, 69, 58, 0.1); border: 1px solid rgba(255, 69, 58, 0.3); border-radius: 10px; padding: 14px; margin-bottom: 16px;">
+                        <p style="margin: 0; color: var(--danger-color); font-weight: 600;">
+                            ⚠️ @(CurrentLang == "en-US" ? "This class is currently cancelled!" : "Te zajęcia są obecnie odwołane!")
+                        </p>
+                        @if (!string.IsNullOrEmpty(selectedLesson.Desc))
+                        {
+                            <p style="margin: 6px 0 0 0; color: var(--text-muted); font-size: 0.85rem;">
+                                @(CurrentLang == "en-US" ? "Reason:" : "Powód:") @selectedLesson.Desc
+                            </p>
+                        }
+                    </div>
+
+                    <button class="btn-action" style="background-color: var(--success-color); color: white;" @onclick="RestoreClass" disabled="@(selectedLesson == null || isSubmittingAction)">
+                        @if (isSubmittingAction)
+                        {
+                            <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                            <span>@(CurrentLang == "en-US" ? "Restoring..." : "Przywracanie...")</span>
+                        }
+                        else
+                        {
+                            <span>✅ @(CurrentLang == "en-US" ? "Restore Class (Undo Cancellation)" : "Przywróć zajęcia (Cofnij odwołanie)")</span>
+                        }
+                    </button>
+                }
+                else
+                {
+                    <div class="form-group">
+                        <label class="form-label">@(CurrentLang == "en-US" ? "Reason for cancellation (optional)" : "Podaj powód odwołania (opcjonalnie)")</label>
+                        <input type="text" placeholder='@(CurrentLang == "en-US" ? "e.g. Lecturer illness, Rector hours..." : "np. Choroba prowadzącego, godziny dziekańskie...")' @bind="cancelReason" />
+                    </div>
+
+                    <button class="btn-action" style="background-color: var(--danger-color); color: white;" @onclick="CancelClass" disabled="@(selectedLesson == null || isSubmittingAction)">
+                        @if (isSubmittingAction)
+                        {
+                            <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                            <span>@(CurrentLang == "en-US" ? "Cancelling..." : "Odwoływanie...")</span>
+                        }
+                        else
+                        {
+                            <span>🚫 @(CurrentLang == "en-US" ? "Confirm Class Cancellation" : "Odwołaj wybrane zajęcia")</span>
+                        }
+                    </button>
+                }
+            </div>
+        }
+
+        <!-- AKCJA 2: PRZEŁÓŻ TERMIN -->
+        @if (scheduleAction == "move")
+        {
+            <div class="starosta-card" style="--card-accent: var(--color-starosta);">
+                <div class="starosta-card-header">
+                    <h2 class="starosta-card-title" style="color: var(--color-starosta);">
+                        <span>⏰</span> @(CurrentLang == "en-US" ? "Reschedule Selected Class" : "Przełóż termin zajęć")
+                    </h2>
+                    <p class="starosta-card-desc">
+                        @(CurrentLang == "en-US" ? "Change date or hours for the selected class. Students will receive an automatic update." : "Zmień datę lub godziny zajęć. Wszyscy studenci w lobby otrzymają zaktualizowany termin.")
+                    </p>
+                </div>
+
+                <div class="form-row-3">
+                    <div>
+                        <label class="form-label">@(CurrentLang == "en-US" ? "New Date" : "Nowa data zajęć")</label>
+                        <input type="date" @bind="moveDate" @bind:format="yyyy-MM-dd" min="2024-01-01" max="2035-12-31" />
+                    </div>
+                    <div>
+                        <label class="form-label">@(CurrentLang == "en-US" ? "Start Hour & Minute" : "Godzina rozpoczęcia")</label>
+                        <div style="display: flex; gap: 6px; align-items: center; width: 100%;">
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 8px; text-align: center;" value="@moveStartTime.Hour" @onchange="OnMoveStartHourChanged">
+                                @for (int h = 0; h <= 23; h++)
+                                {
+                                    <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                                }
+                            </select>
+                            <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 8px; text-align: center;" value="@moveStartTime.Minute" @onchange="OnMoveStartMinuteChanged">
+                                @for (int m = 0; m <= 59; m++)
+                                {
+                                    <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label">@(CurrentLang == "en-US" ? "End Hour & Minute" : "Godzina zakończenia")</label>
+                        <div style="display: flex; gap: 6px; align-items: center; width: 100%;">
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 8px; text-align: center;" value="@moveEndTime.Hour" @onchange="OnMoveEndHourChanged">
+                                @for (int h = 0; h <= 23; h++)
+                                {
+                                    <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                                }
+                            </select>
+                            <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 8px; text-align: center;" value="@moveEndTime.Minute" @onchange="OnMoveEndMinuteChanged">
+                                @for (int m = 0; m <= 59; m++)
+                                {
+                                    <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                @if (selectedLesson != null)
+                {
+                    <div style="background: rgba(255, 159, 10, 0.08); border: 1px solid rgba(255, 159, 10, 0.25); border-radius: 10px; padding: 12px 14px; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 12px;">
+                        <span>📅 @(CurrentLang == "en-US" ? "Original time:" : "Dotychczasowy termin:") <strong>@selectedLesson.Start.ToString("dd.MM HH:mm") – @selectedLesson.End.ToString("HH:mm")</strong></span>
+                        <span style="margin: 0 8px;">➔</span>
+                        <span style="color: var(--color-starosta);">@(CurrentLang == "en-US" ? "New time:" : "Nowy termin:") <strong>@moveDate.ToString("dd.MM") @moveStartTime.ToString("HH:mm") – @moveEndTime.ToString("HH:mm")</strong></span>
+                    </div>
+                }
+
+                <button class="btn-action" style="background-color: var(--color-starosta); color: white;" @onclick="MoveClass" disabled="@(selectedLesson == null || isSubmittingAction)">
+                    @if (isSubmittingAction)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Saving..." : "Zapisywanie...")</span>
+                    }
+                    else
+                    {
+                        <span>⏰ @(CurrentLang == "en-US" ? "Save Rescheduled Class" : "Zapisz przełożony termin")</span>
+                    }
+                </button>
+            </div>
+        }
+
+        <!-- AKCJA 3: ZMIEŃ SALĘ -->
+        @if (scheduleAction == "room")
+        {
+            <div class="starosta-card" style="--card-accent: var(--primary-color);">
+                <div class="starosta-card-header">
+                    <h2 class="starosta-card-title" style="color: var(--primary-color);">
+                        <span>📍</span> @(CurrentLang == "en-US" ? "Change Room or Platform" : "Zmień salę / Miejsce")
+                    </h2>
+                    <p class="starosta-card-desc">
+                        @(CurrentLang == "en-US" ? "Update classroom number, auditorium or online meeting link (e.g. MS Teams)." : "Zaktualizuj numer sali, audytorium lub link do spotkania online (np. MS Teams).")
+                    </p>
+                </div>
+
+                @if (selectedLesson != null)
+                {
+                    <div style="margin-bottom: 14px; font-size: 0.88rem; color: var(--text-secondary);">
+                        📍 @(CurrentLang == "en-US" ? "Current room:" : "Aktualna lokalizacja:") <strong style="color: var(--text-main);">@selectedLesson.Place</strong>
+                    </div>
+                }
+
+                <div class="form-group">
+                    <label class="form-label">@(CurrentLang == "en-US" ? "New Classroom / Platform" : "Nowa sala / platforma")</label>
+                    <input type="text" placeholder='@(CurrentLang == "en-US" ? "e.g. Room 214 (New Wing) / MS Teams" : "np. Sala 214 (Nowe skrzydło) / MS Teams")' @bind="roomNewPlace" />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">@(CurrentLang == "en-US" ? "Scope of Room Change" : "Zasięg zmiany sali")</label>
+                    <select class="form-control" @bind="roomChangeScope" style="font-weight: 600;">
+                        <option value="one">@(CurrentLang == "en-US" ? "📍 Single Class (only this specific date)" : "📍 Jednorazowo (tylko ten konkretny termin)")</option>
+                        <option value="all">@(CurrentLang == "en-US" ? "🔄 All Future Classes (all terms till end of semester)" : "🔄 Stale do końca semestru (wszystkie przyszłe zajęcia z tego przedmiotu)")</option>
+                    </select>
+                    <span style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">
+                        @(roomChangeScope == "all"
+                            ? (CurrentLang == "en-US" ? "Updates room for all occurrences of this subject and type until the end of semester." : "Zaktualizuje salę dla każdego kolejnego terminu tego przedmiotu i grupy do końca semestru.")
+                            : (CurrentLang == "en-US" ? "Applies only to this single selected class." : "Zmieni salę tylko dla tego jednego wybranego terminu."))
+                    </span>
+                </div>
+
+                <button class="btn-action" style="background-color: var(--primary-color); color: white;" @onclick="ChangeRoomClass" disabled="@(selectedLesson == null || isSubmittingAction)">
+                    @if (isSubmittingAction)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Saving..." : "Zapisywanie...")</span>
+                    }
+                    else
+                    {
+                        <span>📍 @(CurrentLang == "en-US" ? (roomChangeScope == "all" ? "Update Room for Entire Semester" : "Update Classroom") : (roomChangeScope == "all" ? "Zaktualizuj salę do końca semestru" : "Zaktualizuj salę w chmurze"))</span>
+                    }
+                </button>
+            </div>
+        }
+
+        <!-- AKCJA 4: DODAJ GLOBALNE WYDARZENIE -->
+        @if (scheduleAction == "custom")
+        {
+            <div class="starosta-card" style="--card-accent: #BF5AF2;">
+                <div class="starosta-card-header">
+                    <h2 class="starosta-card-title" style="color: #BF5AF2;">
+                        <span>📅</span> @(CurrentLang == "en-US" ? "Add Cohort Event to Calendars" : "Dodaj globalne wydarzenie")
+                    </h2>
+                    <p class="starosta-card-desc">
+                        @(CurrentLang == "en-US" ? "Publish custom meetings, dean sessions, or OHS trainings directly into every student's timetable." : "Dodaj niestandardowe wydarzenie, spotkanie rocznika lub szkolenie prosto do planów wszystkich studentów.")
+                    </p>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">@(CurrentLang == "en-US" ? "Event Title" : "Tytuł wydarzenia")</label>
+                    <input type="text" @bind="evTitle" placeholder='@(CurrentLang == "en-US" ? "e.g. OHS Training, Dean Meeting" : "np. Szkolenie BHP, Spotkanie z Dziekanem")' />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">@(CurrentLang == "en-US" ? "Description" : "Opis szczegółowy")</label>
+                    <textarea rows="3" @bind="evDesc" placeholder='@(CurrentLang == "en-US" ? "Additional information, required materials..." : "Dodatkowe informacje, agenda spotkania...")'></textarea>
+                </div>
+
+                <div class="form-row-3">
+                    <div>
+                        <label class="form-label">@(CurrentLang == "en-US" ? "Date" : "Data wydarzenia")</label>
+                        <input type="date" @bind="evDate" @bind:format="yyyy-MM-dd" min="2024-01-01" max="2035-12-31" />
+                    </div>
+                    <div>
+                        <label class="form-label">@(CurrentLang == "en-US" ? "Start Time" : "Godzina startu")</label>
+                        <div style="display: flex; gap: 4px; align-items: center; width: 100%;">
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 6px; text-align: center;" value="@evStartTime.Hour" @onchange="OnEvStartHourChanged">
+                                @for (int h = 0; h < 24; h++)
+                                {
+                                    <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                                }
+                            </select>
+                            <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 6px; text-align: center;" value="@evStartTime.Minute" @onchange="OnEvStartMinuteChanged">
+                                @for (int m = 0; m <= 59; m++)
+                                {
+                                    <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="form-label">@(CurrentLang == "en-US" ? "End Time" : "Godzina końca")</label>
+                        <div style="display: flex; gap: 4px; align-items: center; width: 100%;">
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 6px; text-align: center;" value="@evEndTime.Hour" @onchange="OnEvEndHourChanged">
+                                @for (int h = 0; h < 24; h++)
+                                {
+                                    <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                                }
+                            </select>
+                            <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                            <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 6px; text-align: center;" value="@evEndTime.Minute" @onchange="OnEvEndMinuteChanged">
+                                @for (int m = 0; m <= 59; m++)
+                                {
+                                    <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">@(CurrentLang == "en-US" ? "Location / Hall" : "Lokalizacja / Sala")</label>
+                    <input type="text" @bind="evPlace" placeholder='@(CurrentLang == "en-US" ? "e.g. Main Auditorium / Room 101" : "np. Aula Główna, Sala 101")' />
+                </div>
+
+                <div class="priority-card" @onclick="() => evPriority = !evPriority">
+                    <input type="checkbox" @bind="evPriority" @onclick:stopPropagation="true" />
+                    <div>
+                        <div style="color: var(--danger-color); font-weight: 700; font-size: 0.92rem;">
+                            ⚡ @(CurrentLang == "en-US" ? "Mark as HIGH PRIORITY event" : "Oznacz jako WAŻNE wydarzenie")
+                        </div>
+                        <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">
+                            @(CurrentLang == "en-US" ? "Event will be highlighted with red badge for all students." : "Wydarzenie wyświetli się wszystkim studentom na czerwono z oznaczeniem priorytetu.")
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn-action" style="background-color: #BF5AF2; color: white;" @onclick="CreateGlobalEvent" disabled="@isSubmittingAction">
+                    @if (isSubmittingAction)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Publishing..." : "Publikowanie...")</span>
+                    }
+                    else
+                    {
+                        <span>📅 @(CurrentLang == "en-US" ? "Publish to Cohort Calendars" : "Opublikuj w kalendarzach grupy")</span>
+                    }
+                </button>
+            </div>
+        }
+    }
+
+    <!-- ======================================================== -->
+    <!-- ZAKŁADKA 2: OGŁOSZENIA I KOMUNIKATY                     -->
+    <!-- ======================================================== -->
+    @if (activeTab == "announcements")
+    {
+        <div class="starosta-card" style="--card-accent: var(--primary-color);">
+            <div class="starosta-card-header">
+                <h2 class="starosta-card-title" style="color: var(--primary-color);">
+                    <span>📣</span> @(CurrentLang == "en-US" ? "Publish Urgent Cohort Notice" : "Opublikuj pilny komunikat")
+                </h2>
+                <p class="starosta-card-desc">
+                    @(CurrentLang == "en-US" ? "Post an announcement to the group feed. Students will see it instantly on their dashboard." : "Wiadomość trafi bezpośrednio na tablicę ogłoszeń i pulpit główny wszystkich studentów w Twojej grupie.")
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">@(CurrentLang == "en-US" ? "Headline" : "Nagłówek wiadomości")</label>
+                <input type="text" @bind="annTitle" placeholder='@(CurrentLang == "en-US" ? "e.g. Dean office hours updated" : "np. Zmiana godzin dziekańskich, zapisy na przedmioty")' />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">@(CurrentLang == "en-US" ? "Preview summary" : "Krótka Treść (1 linijka)")</label>
+                <input type="text" @bind="annShort" placeholder='@(CurrentLang == "en-US" ? "Important notice from Dean..." : "Ważne info od Dziekanatu...")' />
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">@(CurrentLang == "en-US" ? "Full announcement body" : "Pełna treść komunikatu")</label>
+                <textarea rows="4" @bind="annDesc" placeholder='@(CurrentLang == "en-US" ? "Detailed explanation..." : "Wpisz treść komunikatu...")'></textarea>
+            </div>
+
+            <div class="form-row-2">
+                <div>
+                    <label class="form-label">@(CurrentLang == "en-US" ? "Expires On (Date)" : "Wygasa automatycznie (data)")</label>
+                    <input type="date" @bind="annExpireDate" @bind:format="yyyy-MM-dd" min="2024-01-01" max="2035-12-31" />
+                </div>
+                <div>
+                    <label class="form-label">@(CurrentLang == "en-US" ? "Expires On (Time)" : "Wygasa automatycznie (godzina)")</label>
+                    <div style="display: flex; gap: 6px; align-items: center; width: 100%;">
+                        <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 8px; text-align: center;" value="@annExpireHour" @onchange="OnAnnExpireHourChanged">
+                            @for (int h = 0; h <= 23; h++)
+                            {
+                                <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                            }
+                        </select>
+                        <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                        <select class="form-control" style="flex: 1; min-width: 0; font-weight: 600; padding: 10px 8px; text-align: center;" value="@annExpireMinute" @onchange="OnAnnExpireMinuteChanged">
+                            @for (int m = 0; m <= 55; m += 5)
+                            {
+                                <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                            }
+                            <option value="59">59</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="priority-card" style="margin-bottom: 18px;" @onclick="() => annPriority = !annPriority">
+                <input type="checkbox" @bind="annPriority" @onclick:stopPropagation="true" />
+                <div>
+                    <div style="color: var(--danger-color); font-weight: 700; font-size: 0.92rem;">
+                        ⚡ @(CurrentLang == "en-US" ? "High Priority / Sticky Notice" : "Push / Pilny priorytet")
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 0.8rem; margin-top: 2px;">
+                        @(CurrentLang == "en-US" ? "Pinned to the very top of the notices feed." : "Komunikat zostanie wyróżniony i przypięty na samej górze tablicy ogłoszeń.")
+                    </div>
+                </div>
+            </div>
+
+            <button class="btn-action" style="background-color: var(--primary-color); color: white;" @onclick="AddAnnouncement" disabled="@isSubmittingAction">
+                @if (isSubmittingAction)
+                {
+                    <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                    <span>@(CurrentLang == "en-US" ? "Publishing..." : "Publikowanie...")</span>
+                }
+                else
+                {
+                    <span>📣 @(CurrentLang == "en-US" ? "Publish Announcement" : "Opublikuj komunikat dla grupy")</span>
+                }
+            </button>
+        </div>
+    }
+
+    <!-- ======================================================== -->
+    <!-- ZAKŁADKA 3: ANKIETY I GŁOSOWANIA                        -->
+    <!-- ======================================================== -->
+    @if (activeTab == "polls")
+    {
+        <div class="starosta-card" style="--card-accent: #BF5AF2;">
+            <div class="starosta-card-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <div>
+                    <h2 class="starosta-card-title" style="color: #BF5AF2;">
+                        <span>🗳️</span> @(CurrentLang == "en-US" ? "Cohort Polls & Live Voting" : "Ankiety i głosowania grupy")
+                    </h2>
+                    <p class="starosta-card-desc">
+                        @(CurrentLang == "en-US" 
+                            ? "Create live votes for your group. Results calculate in real-time." 
+                            : "Twórz błyskawiczne głosowania dla studentów na roku. Wyniki odświeżają się na żywo.")
+                    </p>
+                </div>
+                <button class="btn btn-primary" style="background-color: #BF5AF2; border: none; font-size: 0.85rem; font-weight: 600; padding: 8px 14px; border-radius: 8px;" @onclick="() => isCreatingPoll = !isCreatingPoll">
+                    @(isCreatingPoll ? (CurrentLang == "en-US" ? "✕ Cancel" : "✕ Anuluj") : (CurrentLang == "en-US" ? "+ New Poll" : "+ Nowa ankieta"))
+                </button>
+            </div>
+
+            @if (isCreatingPoll)
+            {
+                <div style="background: rgba(191, 90, 242, 0.06); border: 1px solid rgba(191, 90, 242, 0.25); border-radius: 12px; padding: 18px; margin-bottom: 22px;">
+                    <h4 style="margin: 0 0 14px 0; color: #BF5AF2; font-size: 1rem; font-weight: 700;">
+                        ➕ @(CurrentLang == "en-US" ? "Create New Group Poll" : "Utwórz nową ankietę")
+                    </h4>
+                    <div class="form-group">
+                        <label class="form-label">@(CurrentLang == "en-US" ? "Poll Question" : "Pytanie ankiety")</label>
+                        <input type="text" placeholder='@(CurrentLang == "en-US" ? "e.g. When should we reschedule the exam?" : "np. Na kiedy przekładamy kolokwium z analizy?")' @bind="newPollQuestion" />
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">@(CurrentLang == "en-US" ? "Options to choose from:" : "Warianty odpowiedzi:")</label>
+                        @for (int i = 0; i < newPollOptions.Count; i++)
+                        {
+                            var optIdx = i;
+                            <div style="display: flex; gap: 8px; margin-bottom: 8px; align-items: center;">
+                                <input type="text" placeholder='@(CurrentLang == "en-US" ? $"Option {optIdx + 1}" : $"Opcja {optIdx + 1}")' @bind="newPollOptions[optIdx]" />
+                                @if (newPollOptions.Count > 2)
+                                {
+                                    <button type="button" class="btn btn-secondary" style="color: var(--danger-color); padding: 8px 12px; border-radius: 8px; min-height: unset;" @onclick="() => RemovePollOption(optIdx)">✕</button>
+                                }
+                            </div>
+                        }
+                        @if (newPollOptions.Count < 6)
+                        {
+                            <button type="button" class="btn" style="background: rgba(255, 255, 255, 0.06); border: 1px dashed var(--border-color); color: var(--text-main); width: 100%; padding: 8px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; margin-top: 4px;" @onclick="AddPollOption">
+                                + @(CurrentLang == "en-US" ? "Add another option" : "Dodaj kolejną opcję")
+                            </button>
+                        }
+                    </div>
+                    <button class="btn-action" style="background-color: #BF5AF2; color: white;" @onclick="CreatePollAsync" disabled="@isSubmittingPoll">
+                        @(isSubmittingPoll ? "..." : (CurrentLang == "en-US" ? "Publish Poll to Group" : "Opublikuj ankietę w grupie"))
+                    </button>
+                </div>
+            }
+
+            <!-- LISTA ANKIET -->
+            @if (GroupPolls.Any())
+            {
+                <div style="display: flex; flex-direction: column; gap: 14px;">
+                    @foreach (var poll in GroupPolls)
+                    {
+                        <div style="background: var(--input-bg); border: 1px solid @(poll.IsClosed ? "var(--border-color)" : "rgba(191, 90, 242, 0.3)"); border-radius: 12px; padding: 18px;">
+                            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 10px;">
+                                <div>
+                                    <h3 style="margin: 0 0 4px 0; font-size: 1.08rem; font-weight: 700; color: var(--text-main);">@poll.Question</h3>
+                                    <div style="font-size: 0.8rem; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+                                        <span>📅 @(poll.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"))</span> • 
+                                        <strong style="color: #BF5AF2;">@poll.TotalVotes @(CurrentLang == "en-US" ? "votes" : "głosów")</strong>
+                                        @if (poll.IsClosed)
+                                        {
+                                            <span style="color: var(--danger-color); font-weight: 700; background: rgba(255, 69, 58, 0.12); padding: 2px 6px; border-radius: 4px;">
+                                                @(CurrentLang == "en-US" ? "CLOSED" : "ZAKOŃCZONA")
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span style="color: var(--success-color); font-weight: 700; background: rgba(48, 209, 88, 0.12); padding: 2px 6px; border-radius: 4px;">
+                                                @(CurrentLang == "en-US" ? "ACTIVE" : "AKTYWNA")
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 6px;">
+                                    @if (!poll.IsClosed)
+                                    {
+                                        <button class="btn btn-secondary" style="font-size: 0.78rem; padding: 5px 10px; border-radius: 6px; min-height: unset;" @onclick="() => ClosePollAsync(poll.Id)">
+                                            🔒 @(CurrentLang == "en-US" ? "Close" : "Zakończ")
+                                        </button>
+                                    }
+                                    <button class="btn btn-danger" style="font-size: 0.78rem; padding: 5px 10px; border-radius: 6px; min-height: unset;" @onclick="() => DeletePollAsync(poll.Id)">
+                                        🗑️
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- WYKRES WYNIKÓW -->
+                            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 14px;">
+                                @if (poll.Options != null)
+                                {
+                                    @for (int i = 0; i < poll.Options.Count; i++)
+                                    {
+                                        var opt = poll.Options[i];
+                                        var votes = poll.GetVoteCountForOption(i);
+                                        var pct = poll.GetPercentageForOption(i);
+                                        <div>
+                                            <div style="display: flex; justify-content: space-between; font-size: 0.88rem; margin-bottom: 4px;">
+                                                <span style="font-weight: 600; color: var(--text-main);">@opt</span>
+                                                <span style="color: var(--text-muted); font-size: 0.82rem;"><strong>@pct%</strong> (@votes)</span>
+                                            </div>
+                                            <div style="height: 8px; background: rgba(255, 255, 255, 0.08); border-radius: 999px; overflow: hidden;">
+                                                <div style="height: 100%; width: @pct%; background: linear-gradient(90deg, #BF5AF2, #5E5CE6); border-radius: 999px; transition: width 0.3s ease;"></div>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div style="text-align: center; padding: 32px 20px; color: var(--text-muted); font-size: 0.9rem;">
+                    <div style="font-size: 2.2rem; margin-bottom: 8px;">🗳️</div>
+                    <p style="margin: 0;">@(CurrentLang == "en-US" ? "No active polls in your cohort. Click above to create the first vote!" : "Brak ankiet w Twojej grupie. Kliknij '+ Nowa ankieta' powyżej, aby utworzyć pierwsze głosowanie!")</p>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- ======================================================== -->
+    <!-- ZAKŁADKA 4: LOBBY & UPRAWNIENIA (TYLKO STAROSTA)        -->
+    <!-- ======================================================== -->
+    @if (activeTab == "settings" && AppState.IsStarosta)
+    {
+        <!-- KOD POKOJU -->
+        <div class="starosta-card" style="--card-accent: var(--primary-color);">
+            <div class="starosta-card-header">
+                <h2 class="starosta-card-title" style="color: var(--primary-color);">
+                    <span>🔑</span> @(CurrentLang == "en-US" ? "Group & Room Code (Lobby)" : "Kod Pokoju & Grupy (Lobby)")
+                </h2>
+                <p class="starosta-card-desc">
+                    @(CurrentLang == "en-US" 
+                        ? "Change your group room code anytime. The old code will act as a redirect alias so existing students remain connected without being kicked." 
+                        : "W razie potrzeby możesz zmienić kod pokoju grupy. Stary kod zachowa automatyczne aliasowanie – żaden student w lobby nie zostanie rozłączony.")
+                </p>
+            </div>
+
+            @if (!string.IsNullOrEmpty(AppState.GroupCode))
+            {
+                <div style="background: rgba(255, 255, 255, 0.04); border-radius: 12px; padding: 14px 18px; margin-bottom: 18px; border: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <span style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">@(CurrentLang == "en-US" ? "Active Room Code:" : "Aktualny kod pokoju:")</span>
+                        <span style="font-weight: 700; color: var(--primary-color); margin-left: 10px; font-size: 1.25rem; letter-spacing: 0.06em;">@AppState.GroupCode</span>
+                    </div>
+                    <span style="background: rgba(48, 209, 88, 0.15); color: #30D158; border: 1px solid rgba(48, 209, 88, 0.35); font-weight: 600; font-size: 0.8rem; padding: 4px 12px; border-radius: 999px;">
+                        ● @(CurrentLang == "en-US" ? "Lobby Active" : "Lobby aktywne")
+                    </span>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">@(CurrentLang == "en-US" ? "New Room Code (min. 5 chars):" : "Nowy kod pokoju (min. 5 znaków):")</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" style="flex: 1; text-transform: uppercase; font-weight: 700; letter-spacing: 0.05em;" placeholder='@(CurrentLang == "en-US" ? "e.g. INF2026..." : "np. INF2026...")' @bind="newGroupCodeInput" />
+                        <button type="button" class="btn btn-secondary" style="border: 1px solid var(--border-color); font-weight: 600; border-radius: 10px; padding: 8px 16px; font-size: 0.88rem; white-space: nowrap;" @onclick="GenerateRandomCode">
+                            🎲 @(CurrentLang == "en-US" ? "Random" : "Losowy")
+                        </button>
+                    </div>
+                </div>
+
+                <button class="btn-action" style="background-color: var(--primary-color); color: white;" @onclick="ChangeGroupCode" disabled="@isChangingGroupCode">
+                    @if (isChangingGroupCode)
+                    {
+                        <span class="spinner-border spinner-border-sm" role="status" style="width: 14px; height: 14px; margin-right: 6px;"></span>
+                        <span>@(CurrentLang == "en-US" ? "Updating..." : "Zapisywanie...")</span>
+                    }
+                    else
+                    {
+                        <span>🔑 @(CurrentLang == "en-US" ? "Update Room Code" : "Zaktualizuj kod pokoju w chmurze")</span>
+                    }
+                </button>
+            }
+        </div>
+
+        <!-- ADMINISTRATORZY -->
+        <div class="starosta-card" style="--card-accent: var(--danger-color); border: 1px solid rgba(255, 69, 58, 0.35);">
+            <div class="starosta-card-header">
+                <h2 class="starosta-card-title" style="color: var(--danger-color);">
+                    <span>🛡️</span> @(CurrentLang == "en-US" ? "Group Administrators" : "Administratorzy w grupie")
+                </h2>
+                <p class="starosta-card-desc">
+                    @(CurrentLang == "en-US" 
+                        ? "Admins can reschedule/cancel classes and post announcements. Only Starosta can appoint or remove Admins by student album number." 
+                        : "Administratorzy mogą odwoływać i przesuwać zajęcia oraz publikować ogłoszenia. Jako Starosta możesz mianować i usuwać administratorów na podstawie numeru albumu.")
+                </p>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+                <label class="form-label" style="color: var(--danger-color);">🛡️ @(CurrentLang == "en-US" ? "Appointed Administrators:" : "Mianowani Administratorzy:")</label>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; min-height: 38px; align-items: center;">
+                    @if (GroupAdmins.Any())
+                    {
+                        @foreach (var admin in GroupAdmins)
+                        {
+                            <span style="display: inline-flex; align-items: center; gap: 8px; background: rgba(255, 69, 58, 0.15); border: 1px solid rgba(255, 69, 58, 0.35); color: var(--danger-color); font-weight: 600; font-size: 0.88rem; padding: 6px 12px; border-radius: 8px;">
+                                <span>🛡️ @admin</span>
+                                <button type="button" style="background: none; border: none; color: var(--danger-color); cursor: pointer; font-size: 0.95rem; padding: 0 2px; font-weight: bold;" title="Usuń administratora" @onclick="() => RemoveAdmin(admin)">✕</button>
+                            </span>
+                        }
+                    }
+                    else
+                    {
+                        <span style="color: var(--text-muted); font-size: 0.88rem;">@(CurrentLang == "en-US" ? "No administrators appointed yet." : "Brak mianowanych administratorów.")</span>
+                    }
+                </div>
+
+                <div style="display: flex; gap: 8px;">
+                    <input type="text" style="flex: 1;" placeholder='@(CurrentLang == "en-US" ? "Student album number (e.g. 123456)..." : "Numer albumu studenta (np. 123456)...")' @bind="newAdminAlbum" />
+                    <button class="btn btn-danger" style="color: white; font-weight: 600; border-radius: 10px; padding: 10px 18px; white-space: nowrap;" @onclick="AddAdmin">
+                        @(CurrentLang == "en-US" ? "+ Add Admin" : "+ Mianuj Admina")
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+}
+
+@code {
+    [CascadingParameter] public MainLayout? Layout { get; set; }
+
+    private List<Lesson> AvailableLessons = new();
+    private string CurrentLang = "pl-PL";
+
+    // Nawigacja
+    private string activeTab = "schedule"; // "schedule", "announcements", "polls", "settings"
+    private string scheduleAction = "cancel"; // "cancel", "move", "room", "custom"
+
+    // Wyszukiwarka i filtry zajęć
+    private string lessonSearchQuery = "";
+    private string lessonFilterDay = "all"; // "all", "today", "tomorrow", "this_week"
+    private bool isLessonListOpen = false;
+    private Lesson? selectedLesson = null;
+
+    // Formularz odwołania
+    private string cancelReason = "";
+
+    // Formularz przesunięcia
+    private DateOnly moveDate = DateOnly.FromDateTime(DateTime.Today);
+    private TimeOnly moveStartTime = new(15, 15);
+    private TimeOnly moveEndTime = new(16, 45);
+
+    // Formularz zmiany sali
+    private string roomNewPlace = "";
+    private string roomChangeScope = "one"; // "one" | "all"
+    private bool isSubmittingAction = false;
+
+    private void OnMoveStartHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+            moveStartTime = new TimeOnly(h, moveStartTime.Minute);
+    }
+
+    private void OnMoveStartMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+            moveStartTime = new TimeOnly(moveStartTime.Hour, m);
+    }
+
+    private void OnMoveEndHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+            moveEndTime = new TimeOnly(h, moveEndTime.Minute);
+    }
+
+    private void OnMoveEndMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+            moveEndTime = new TimeOnly(moveEndTime.Hour, m);
+    }
+
+    private int annExpireHour = 23;
+    private int annExpireMinute = 59;
+
+    private void OnAnnExpireHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+        {
+            annExpireHour = h;
+            annExpireTime = new TimeOnly(annExpireHour, annExpireMinute);
+        }
+    }
+
+    private void OnAnnExpireMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+        {
+            annExpireMinute = m;
+            annExpireTime = new TimeOnly(annExpireHour, annExpireMinute);
+        }
+    }
+
+    private void OnEvStartHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+            evStartTime = new TimeOnly(h, evStartTime.Minute);
+    }
+
+    private void OnEvStartMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+            evStartTime = new TimeOnly(evStartTime.Hour, m);
+    }
+
+    private void OnEvEndHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+            evEndTime = new TimeOnly(h, evEndTime.Minute);
+    }
+
+    private void OnEvEndMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+            evEndTime = new TimeOnly(evEndTime.Hour, m);
+    }
+
+    // Formularz wydarzenia
+    private string evTitle = "";
+    private string evPlace = "";
+    private string evDesc = "";
+    private bool evPriority = false;
+    private DateOnly evDate = DateOnly.FromDateTime(DateTime.Today);
+    private TimeOnly evStartTime = new(12, 0);
+    private TimeOnly evEndTime = new(13, 0);
+
+    // Formularz ogłoszenia
+    private string annTitle = "";
+    private string annShort = "";
+    private string annDesc = "";
+    private DateOnly annExpireDate = DateOnly.FromDateTime(DateTime.Today.AddDays(7));
+    private TimeOnly annExpireTime = new(23, 59);
+    private bool annPriority = false;
+
+    // Kod pokoju
+    private string newGroupCodeInput = "";
+
+    // Moderacja Admina
+    private List<string> GroupStarostas = new();
+    private List<string> GroupAdmins = new();
+    private string newAdminAlbum = "";
+
+    // Ankiety grupy (Polls)
+    private List<GroupPoll> GroupPolls = new();
+    private bool isCreatingPoll = false;
+    private bool isSubmittingPoll = false;
+    private string newPollQuestion = "";
+    private List<string> newPollOptions = new() { "", "" };
+    private System.Timers.Timer? _pollsTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentLang = AppState.Language;
+        AppState.OnChange += OnAppStateChanged;
+        ScheduleService.OnScheduleLoaded += OnScheduleDataChanged;
+
+        if (AppState.HasManagementPrivileges)
+        {
+            RefreshLessonsList();
+            await LoadGroupRolesAsync();
+            await LoadPollsAsync();
+            EnsurePollsSubscription();
+        }
+    }
+
+    private void SetTab(string tab)
+    {
+        activeTab = tab;
+    }
+
+    private void SetScheduleAction(string action)
+    {
+        scheduleAction = action;
+        isLessonListOpen = false;
+    }
+
+    private void SetLessonDayFilter(string filter)
+    {
+        lessonFilterDay = filter;
+        isLessonListOpen = true;
+    }
+
+    private void ToggleLessonList()
+    {
+        isLessonListOpen = !isLessonListOpen;
+    }
+
+    private void ClearSearch()
+    {
+        lessonSearchQuery = "";
+    }
+
+    private IEnumerable<Lesson> FilteredLessons
+    {
+        get
+        {
+            var now = DateTime.Now;
+            var list = AvailableLessons.Where(l => l.End >= now).AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(lessonSearchQuery))
+            {
+                var q = lessonSearchQuery.Trim().ToLowerInvariant();
+                list = list.Where(l =>
+                    (l.Title != null && l.Title.ToLowerInvariant().Contains(q)) ||
+                    (l.Place != null && l.Place.ToLowerInvariant().Contains(q)) ||
+                    (l.Person != null && l.Person.ToLowerInvariant().Contains(q)) ||
+                    (l.Group != null && l.Group.ToLowerInvariant().Contains(q)) ||
+                    l.Start.ToString("dd.MM.yyyy HH:mm").Contains(q) ||
+                    l.Start.ToString("dddd", new System.Globalization.CultureInfo(CurrentLang)).ToLowerInvariant().Contains(q)
+                );
+            }
+
+            var today = DateTime.Today;
+            if (lessonFilterDay == "today")
+            {
+                list = list.Where(l => l.Start.Date == today);
+            }
+            else if (lessonFilterDay == "tomorrow")
+            {
+                list = list.Where(l => l.Start.Date == today.AddDays(1));
+            }
+            else if (lessonFilterDay == "this_week")
+            {
+                int diff = (7 + (today.DayOfWeek - DayOfWeek.Monday)) % 7;
+                var mon = today.AddDays(-diff);
+                var sun = mon.AddDays(7);
+                list = list.Where(l => l.Start.Date >= mon && l.Start.Date < sun);
+            }
+
+            return list;
+        }
+    }
+
+    private void SelectLesson(Lesson lesson)
+    {
+        selectedLesson = lesson;
+        isLessonListOpen = false;
+
+        var start = lesson.Start.Year < 2024 ? DateTime.Today.AddHours(lesson.Start.Hour).AddMinutes(lesson.Start.Minute) : lesson.Start;
+        var end = lesson.End.Year < 2024 ? start.AddHours(1.5) : lesson.End;
+
+        // Synchronizacja pól przesunięcia
+        moveDate = DateOnly.FromDateTime(start);
+        moveStartTime = TimeOnly.FromDateTime(start);
+        moveEndTime = TimeOnly.FromDateTime(end);
+
+        // Pre-fill pokoju
+        roomNewPlace = "";
+    }
+
+    private void RefreshLessonsList()
+    {
+        var now = DateTime.Now;
+        AvailableLessons = ScheduleService.GetPreparedData()
+            .Where(l => !l.IsPersonal && l.End >= now)
+            .OrderBy(l => l.Start)
+            .ToList();
+
+        if (selectedLesson == null || !AvailableLessons.Any(l => ScheduleService.GetLessonKey(l) == ScheduleService.GetLessonKey(selectedLesson)))
+        {
+            if (AvailableLessons.Any())
+            {
+                SelectLesson(AvailableLessons.First());
+            }
+            else
+            {
+                selectedLesson = null;
+            }
+        }
+    }
+
+    private void OnScheduleDataChanged()
+    {
+        InvokeAsync(() =>
+        {
+            RefreshLessonsList();
+            StateHasChanged();
+        });
+    }
+
+    private void OnAppStateChanged()
+    {
+        CurrentLang = AppState.Language;
+        if (AppState.HasManagementPrivileges && !AvailableLessons.Any())
+        {
+            _ = InvokeAsync(async () =>
+            {
+                RefreshLessonsList();
+                await LoadGroupRolesAsync();
+                await LoadPollsAsync();
+                EnsurePollsSubscription();
+                StateHasChanged();
+            });
+        }
+        else
+        {
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task CancelClass()
+    {
+        if (!AppState.HasManagementPrivileges || selectedLesson == null || isSubmittingAction) return;
+        if (selectedLesson.End < DateTime.Now)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Cannot modify classes that have already passed!" : "Nie można modyfikować zajęć, które już się odbyły!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var lesson = ScheduleService.GetPreparedData().Concat(ScheduleService.CustomEvents)
+            .FirstOrDefault(l => ScheduleService.GetLessonKey(l) == ScheduleService.GetLessonKey(selectedLesson));
+
+        if (lesson != null)
+        {
+            isSubmittingAction = true;
+            try
+            {
+                await ScheduleService.CancelLessonAsync(lesson, cancelReason);
+                HapticHelper.TriggerWarning();
+                Layout?.ShowToast(CurrentLang == "en-US" ? $"Class '{lesson.Title}' has been cancelled!" : $"Zajęcia '{lesson.Title}' zostały odwołane!", MainLayout.ToastType.Warning);
+                RefreshLessonsList();
+                AppState.NotifyStateChanged();
+            }
+            finally
+            {
+                isSubmittingAction = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task RestoreClass()
+    {
+        if (!AppState.HasManagementPrivileges || selectedLesson == null || isSubmittingAction) return;
+        if (selectedLesson.End < DateTime.Now)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Cannot modify classes that have already passed!" : "Nie można modyfikować zajęć, które już się odbyły!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var lesson = ScheduleService.GetPreparedData().Concat(ScheduleService.CustomEvents)
+            .FirstOrDefault(l => ScheduleService.GetLessonKey(l) == ScheduleService.GetLessonKey(selectedLesson));
+
+        if (lesson != null)
+        {
+            isSubmittingAction = true;
+            try
+            {
+                await ScheduleService.RestoreLessonAsync(lesson);
+                HapticHelper.TriggerSuccess();
+                Layout?.ShowToast(CurrentLang == "en-US" ? $"Class '{lesson.Title}' restored successfully!" : $"Zajęcia '{lesson.Title}' zostały przywrócone!", MainLayout.ToastType.Success);
+                RefreshLessonsList();
+                AppState.NotifyStateChanged();
+            }
+            finally
+            {
+                isSubmittingAction = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task MoveClass()
+    {
+        if (!AppState.HasManagementPrivileges || selectedLesson == null || isSubmittingAction) return;
+        if (selectedLesson.End < DateTime.Now)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Cannot modify classes that have already passed!" : "Nie można modyfikować zajęć, które już się odbyły!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var lesson = ScheduleService.GetPreparedData().Concat(ScheduleService.CustomEvents)
+            .FirstOrDefault(l => ScheduleService.GetLessonKey(l) == ScheduleService.GetLessonKey(selectedLesson));
+
+        if (lesson != null)
+        {
+            var newStart = moveDate.ToDateTime(moveStartTime);
+            var newEnd = moveDate.ToDateTime(moveEndTime);
+
+            if (newEnd <= newStart)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "End time must be after start time!" : "Godzina zakończenia musi być późniejsza niż start!", MainLayout.ToastType.Warning);
+                return;
+            }
+
+            isSubmittingAction = true;
+            try
+            {
+                await ScheduleService.RescheduleLessonAsync(lesson, newStart, newEnd);
+                HapticHelper.TriggerSuccess();
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Successfully rescheduled class in group." : "Pomyślnie zmieniono termin zajęć w grupie.", MainLayout.ToastType.Success);
+                RefreshLessonsList();
+                AppState.NotifyStateChanged();
+            }
+            finally
+            {
+                isSubmittingAction = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task ChangeRoomClass()
+    {
+        if (!AppState.HasManagementPrivileges || selectedLesson == null || isSubmittingAction) return;
+        if (selectedLesson.End < DateTime.Now)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Cannot modify classes that have already passed!" : "Nie można modyfikować zajęć, które już się odbyły!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(roomNewPlace))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please provide new room or platform!" : "Wpisz nową salę lub platformę!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var lesson = ScheduleService.GetPreparedData().Concat(ScheduleService.CustomEvents)
+            .FirstOrDefault(l => ScheduleService.GetLessonKey(l) == ScheduleService.GetLessonKey(selectedLesson));
+
+        if (lesson != null)
+        {
+            isSubmittingAction = true;
+            try
+            {
+                bool allFuture = (roomChangeScope == "all");
+                int affected = await ScheduleService.ChangeRoomAsync(lesson, roomNewPlace.Trim(), allFutureSemesterClasses: allFuture);
+                HapticHelper.TriggerSuccess();
+                string newPlc = roomNewPlace.Trim();
+                roomNewPlace = "";
+                RefreshLessonsList();
+                AppState.NotifyStateChanged();
+
+                if (allFuture)
+                {
+                    Layout?.ShowToast(CurrentLang == "en-US" 
+                        ? $"Room updated to {newPlc} for {affected} occurrences till semester end!" 
+                        : $"Zaktualizowano salę na {newPlc} dla {affected} terminów do końca semestru!", MainLayout.ToastType.Success);
+                }
+                else
+                {
+                    Layout?.ShowToast(CurrentLang == "en-US" ? $"Moved class to room: {newPlc}" : $"Przeniesiono zajęcia do sali: {newPlc}", MainLayout.ToastType.Success);
+                }
+            }
+            finally
+            {
+                isSubmittingAction = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task CreateGlobalEvent()
+    {
+        if (!AppState.HasManagementPrivileges || isSubmittingAction) return;
+        if (string.IsNullOrWhiteSpace(evTitle))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please enter event title!" : "Podaj tytuł wydarzenia!", MainLayout.ToastType.Error);
+            return;
+        }
+
+        var start = evDate.ToDateTime(evStartTime);
+        var end = evDate.ToDateTime(evEndTime);
+        if (end <= start)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "End time must be after start time!" : "Godzina zakończenia musi być późniejsza niż start!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var newEvent = new Lesson
+        {
+            Id = ScheduleLogic.GenerateUniqueEventId(ScheduleService.CustomEvents.Select(c => c.Id)),
+            Title = evTitle.Trim(),
+            Desc = evDesc.Trim(),
+            Start = start,
+            End = end,
+            Place = string.IsNullOrWhiteSpace(evPlace) ? (CurrentLang == "en-US" ? "No location" : "Brak miejsca") : evPlace.Trim(),
+            Type = "STAR",
+            Person = AppState.IsStarosta ? "Starosta" : "Admin",
+            Group = "ALL",
+            IsHighPriority = evPriority,
+            IsPersonal = false
+        };
+
+        isSubmittingAction = true;
+        try
+        {
+            await ScheduleService.AddCustomEventAsync(newEvent);
+            HapticHelper.TriggerSuccess();
+
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Event published to cohort calendars in cloud!" : "Wydarzenie opublikowane w chmurze dla wszystkich na roku!", MainLayout.ToastType.Success);
+            evTitle = "";
+            evPlace = "";
+            evDesc = "";
+            evPriority = false;
+            RefreshLessonsList();
+        }
+        finally
+        {
+            isSubmittingAction = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AddAnnouncement()
+    {
+        if (!AppState.HasManagementPrivileges || isSubmittingAction) return;
+        if (string.IsNullOrWhiteSpace(annTitle))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please enter announcement title!" : "Podaj tytuł ogłoszenia!", MainLayout.ToastType.Error);
+            return;
+        }
+
+        var expire = annExpireDate.ToDateTime(new TimeOnly(annExpireHour, annExpireMinute));
+
+        isSubmittingAction = true;
+        try
+        {
+            await AnnouncementService.AddAnnouncementAsync(new Portal_Studenta.Services.AnnouncementItem
+            {
+                Title = annTitle.Trim(),
+                ShortContent = annShort.Trim(),
+                Content = annDesc.Trim(),
+                Author = AppState.IsStarosta ? "Starosta" : "Admin",
+                IsPriority = annPriority,
+                ExpireDate = expire,
+                IsSystem = false
+            });
+            HapticHelper.TriggerSuccess();
+
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Published successfully!" : "Dodano pomyślnie!", MainLayout.ToastType.Success);
+            annTitle = "";
+            annShort = "";
+            annDesc = "";
+            annPriority = false;
+        }
+        finally
+        {
+            isSubmittingAction = false;
+            StateHasChanged();
+        }
+    }
+
+    // --- ZARZĄDZANIE KODEM POKOJU (STAROSTA) ---
+    private void GenerateRandomCode()
+    {
+        var random = new Random();
+        const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        newGroupCodeInput = new string(Enumerable.Repeat(chars, 6).Select(s => s[random.Next(s.Length)]).ToArray());
+    }
+
+    private bool isChangingGroupCode = false;
+
+    private async Task ChangeGroupCode()
+    {
+        if (!AppState.IsStarosta || isChangingGroupCode) return;
+        if (string.IsNullOrWhiteSpace(newGroupCodeInput) || newGroupCodeInput.Trim().Length < 5)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "New room code must have at least 5 characters!" : "Nowy kod pokoju musi mieć co najmniej 5 znaków!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        string targetCode = newGroupCodeInput.Trim().ToUpper();
+        string currentCode = AppState.GroupCode;
+
+        if (targetCode.Equals(currentCode, StringComparison.OrdinalIgnoreCase))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "This is your current room code!" : "To jest Twój obecny kod pokoju!", MainLayout.ToastType.Info);
+            return;
+        }
+
+        isChangingGroupCode = true;
+        try
+        {
+            var result = await FirebaseService.ChangeGroupCodeAsync(currentCode, targetCode);
+            if (result == FirebaseService.ChangeGroupResult.Success)
+            {
+                HapticHelper.TriggerSuccess();
+                AppState.SetGroupCode(targetCode);
+                newGroupCodeInput = "";
+                Layout?.ShowToast(CurrentLang == "en-US" 
+                    ? $"Room code changed to {targetCode}! Lobby redirect active for members." 
+                    : $"Kod pokoju zmieniony na {targetCode}! Lobby automatycznie przekierowuje studentów.", 
+                    MainLayout.ToastType.Success);
+            }
+            else if (result == FirebaseService.ChangeGroupResult.AlreadyExists)
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" 
+                    ? $"Lobby ID '{targetCode}' is already taken by another group! Choose a different ID." 
+                    : $"Kod pokoju (ID lobby) '{targetCode}' jest już zajęty przez inną grupę! Wybierz inny identyfikator.", 
+                    MainLayout.ToastType.Warning);
+            }
+            else
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Failed to change room code." : "Nie udało się zmienić kodu pokoju.", MainLayout.ToastType.Error);
+            }
+        }
+        finally
+        {
+            isChangingGroupCode = false;
+        }
+    }
+
+    // --- MODERACJA ADMINÓW (STAROSTA) ---
+    private async Task LoadGroupRolesAsync()
+    {
+        if (!AppState.HasManagementPrivileges || string.IsNullOrEmpty(AppState.GroupCode)) return;
+
+        try
+        {
+            var group = await FirebaseService.GetGroupAsync(AppState.GroupCode);
+            if (group != null)
+            {
+                GroupStarostas = group.Starostas ?? new List<string>();
+                var rawAdmins = group.Admins ?? new List<string>();
+                GroupAdmins = rawAdmins.Where(a => !string.Equals(a, group.OwnerId, StringComparison.OrdinalIgnoreCase) && !GroupStarostas.Contains(a, StringComparer.OrdinalIgnoreCase)).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Starosta] Błąd pobierania ról grupy: {ex.Message}");
+        }
+    }
+
+    private async Task AddAdmin()
+    {
+        if (!AppState.IsStarosta) return;
+        if (string.IsNullOrWhiteSpace(newAdminAlbum))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Enter student album number!" : "Wpisz numer albumu studenta!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        string album = newAdminAlbum.Trim();
+        if (GroupAdmins.Contains(album))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Student is already an Administrator!" : "Ten student jest już Administratorem!", MainLayout.ToastType.Info);
+            return;
+        }
+
+        bool success = await FirebaseService.AddGroupAdminAsync(AppState.GroupCode, album);
+        if (success)
+        {
+            HapticHelper.TriggerSuccess();
+            GroupAdmins.Add(album);
+            newAdminAlbum = "";
+            Layout?.ShowToast(CurrentLang == "en-US" ? $"Student {album} granted Admin role!" : $"Student {album} mianowany Administratorem!", MainLayout.ToastType.Success);
+        }
+        else
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Failed to update Admin role." : "Nie udało się zapisać roli Admina.", MainLayout.ToastType.Error);
+        }
+    }
+
+    private async Task RemoveAdmin(string album)
+    {
+        if (!AppState.IsStarosta) return;
+        bool success = await FirebaseService.RemoveGroupAdminAsync(AppState.GroupCode, album);
+        if (success)
+        {
+            HapticHelper.TriggerWarning();
+            GroupAdmins.Remove(album);
+            Layout?.ShowToast(CurrentLang == "en-US" ? $"Removed Admin privileges for {album}." : $"Odebrano uprawnienia Admina dla {album}.", MainLayout.ToastType.Warning);
+        }
+    }
+
+    // --- ANKIETY (POLLS) ---
+    private void EnsurePollsSubscription()
+    {
+        if (!AppState.HasManagementPrivileges || string.IsNullOrEmpty(AppState.GroupCode)) return;
+        try
+        {
+            _pollsTimer?.Stop();
+            _pollsTimer?.Dispose();
+            _pollsTimer = new System.Timers.Timer(15000);
+            _pollsTimer.Elapsed += (s, e) =>
+            {
+                InvokeAsync(async () =>
+                {
+                    try
+                    {
+                        await LoadPollsAsync();
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[Starosta] Błąd timera ankiet: {ex.Message}");
+                    }
+                });
+            };
+            _pollsTimer.AutoReset = true;
+            _pollsTimer.Start();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Starosta] Błąd konfiguracji timera ankiet: {ex.Message}");
+        }
+    }
+
+    private async Task LoadPollsAsync()
+    {
+        if (!AppState.HasManagementPrivileges || string.IsNullOrEmpty(AppState.GroupCode)) return;
+        try
+        {
+            GroupPolls = await FirebaseService.GetGroupPollsAsync(AppState.GroupCode);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Starosta] Błąd LoadPollsAsync: {ex.Message}");
+        }
+    }
+
+    private void AddPollOption()
+    {
+        if (newPollOptions.Count < 6) newPollOptions.Add("");
+    }
+
+    private void RemovePollOption(int idx)
+    {
+        if (newPollOptions.Count > 2 && idx >= 0 && idx < newPollOptions.Count)
+        {
+            newPollOptions.RemoveAt(idx);
+        }
+    }
+
+    private async Task CreatePollAsync()
+    {
+        if (!AppState.HasManagementPrivileges || isSubmittingPoll) return;
+        if (string.IsNullOrWhiteSpace(newPollQuestion))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Enter poll question!" : "Wpisz pytanie ankiety!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        var validOptions = newPollOptions.Where(o => !string.IsNullOrWhiteSpace(o)).Select(o => o.Trim()).ToList();
+        if (validOptions.Count < 2)
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please provide at least 2 non-empty options!" : "Podaj co najmniej 2 warianty odpowiedzi!", MainLayout.ToastType.Warning);
+            return;
+        }
+
+        isSubmittingPoll = true;
+        try
+        {
+            var poll = new GroupPoll
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                GroupCode = AppState.GroupCode,
+                Question = newPollQuestion.Trim(),
+                Options = validOptions,
+                CreatedBy = AppState.IsStarosta ? "Starosta" : "Admin",
+                CreatedAt = DateTime.UtcNow
+            };
+
+            bool success = await FirebaseService.CreateGroupPollAsync(AppState.GroupCode, poll);
+            if (success)
+            {
+                HapticHelper.TriggerSuccess();
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Poll published to group!" : "Ankieta została opublikowana!", MainLayout.ToastType.Success);
+                newPollQuestion = "";
+                newPollOptions = new() { "", "" };
+                isCreatingPoll = false;
+                await LoadPollsAsync();
+            }
+            else
+            {
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Failed to publish poll." : "Nie udało się opublikować ankiety.", MainLayout.ToastType.Error);
+            }
+        }
+        finally
+        {
+            isSubmittingPoll = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ClosePollAsync(string pollId)
+    {
+        if (!AppState.HasManagementPrivileges) return;
+        bool success = await FirebaseService.CloseGroupPollAsync(AppState.GroupCode, pollId);
+        if (success)
+        {
+            HapticHelper.TriggerClick();
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Poll closed." : "Ankieta została zakończona.", MainLayout.ToastType.Info);
+            await LoadPollsAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeletePollAsync(string pollId)
+    {
+        if (!AppState.HasManagementPrivileges) return;
+        bool success = await FirebaseService.DeleteGroupPollAsync(AppState.GroupCode, pollId);
+        if (success)
+        {
+            HapticHelper.TriggerWarning();
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Poll deleted." : "Ankieta została usunięta.", MainLayout.ToastType.Warning);
+            await LoadPollsAsync();
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        _pollsTimer?.Stop();
+        _pollsTimer?.Dispose();
+        _pollsTimer = null;
+        AppState.OnChange -= OnAppStateChanged;
+        ScheduleService.OnScheduleLoaded -= OnScheduleDataChanged;
+    }
+}

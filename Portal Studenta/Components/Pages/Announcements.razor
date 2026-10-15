@@ -1,0 +1,311 @@
+@page "/announcements"
+@inject Portal_Studenta.Services.AnnouncementService AnnouncementService
+@inject IJSRuntime JS
+@inject Portal_Studenta.Services.AppState AppState
+@inject NavigationManager Nav
+@implements IDisposable
+
+<div>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 25px;">
+        <div>
+            <h1 style="margin-bottom: 5px; color: var(--primary-color);">
+                @(CurrentLang == "en-US" ? "Announcements" : "Ogłoszenia") 📣
+            </h1>
+            <p style="color: var(--text-muted); margin: 0;">@(CurrentLang == "en-US" ? "All notices from faculty administration and student reps." : "Wszystkie info od administracji i starosty.")</p>
+        </div>
+
+        @if (AppState.HasManagementPrivileges)
+        {
+            <button class="btn" style="background-color: var(--color-starosta); font-weight: bold;" @onclick="OpenAddModal">
+                @(CurrentLang == "en-US" ? "+ New Announcement" : "+ Dodaj ogłoszenie")
+            </button>
+        }
+    </div>
+
+    @if (string.IsNullOrEmpty(AppState.GroupCode))
+    {
+        <div style="background: rgba(var(--primary-rgb), 0.1); border-left: 4px solid var(--primary-color); padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <strong style="color: var(--primary-color);">@(CurrentLang == "en-US" ? "No group assigned" : "Nie masz przypisanej grupy")</strong>
+                <p style="margin: 0; font-size: 0.9rem; color: var(--text-muted);">@(CurrentLang == "en-US" ? "Join a group to receive announcements from your cohort representative." : "Dołącz do grupy, aby widzieć komunikaty od Starosty.")</p>
+            </div>
+            <button class="btn" style="background-color: var(--primary-color); color: white;" @onclick='() => Nav.NavigateTo("/profile")'>@(CurrentLang == "en-US" ? "Join" : "Dołącz")</button>
+        </div>
+    }
+
+    <div class="schedule-list">
+            @if (News.Count == 0)
+            {
+                <div style="text-align: center; padding: 30px; color: var(--text-muted);">
+                    <p style="font-size: 2rem;">🕊️</p>
+                    <p>@(CurrentLang == "en-US" ? "All quiet here! No pending announcements. Take a break." : "Pusto tu! Nikt nic od Ciebie nie chce. Odpoczywaj.")</p>
+                </div>
+            }
+            else
+            {
+                @foreach (var item in News)
+                {
+                    var isSys = item.IsSystem || item.Author.ToLower() == "dev" || item.Author.ToLower() == "system";
+                    var leftBorderColor = isSys ? "#BF5AF2" : (item.IsPriority ? "var(--danger-color)" : "var(--color-starosta)");
+                    var emoji = isSys ? "🛠️" : (item.IsPriority ? "🚨" : "📣");
+
+                    <div class="card" style="border-left-color: @leftBorderColor; cursor: pointer; margin-bottom: 15px; @(isSys ? "background: rgba(191, 90, 242, 0.04);" : "")" @onclick="() => OpenDetailsModal(item)">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px;">
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                @if (isSys)
+                                {
+                                    <span class="type-pill news-badge-system">🛠️ @(string.IsNullOrWhiteSpace(item.Author) ? "DEV" : item.Author.ToUpper())</span>
+                                }
+                                else if (item.IsPriority)
+                                {
+                                    <span class="badge danger">@(CurrentLang == "en-US" ? "IMPORTANT" : "WAŻNE")</span>
+                                    <span class="badge starosta">@item.Author</span>
+                                }
+                                else
+                                {
+                                    <span class="badge starosta">@item.Author</span>
+                                }
+                                <h3 style="margin: 0; font-size: 1.15rem;">@emoji @item.Title</h3>
+                            </div>
+                            <small style="color: var(--text-muted); font-weight: 500;">@item.DisplayTime</small>
+                        </div>
+                        <p style="margin-top: 10px; margin-bottom: 0; color: var(--text-muted); line-height: 1.4;">@item.ShortContent</p>
+                    </div>
+                }
+            }
+        </div>
+</div>
+
+@* Modal szczegółów *@
+@if (IsDetailsModalOpen && SelectedAnnouncement != null)
+{
+    var isSys = SelectedAnnouncement.IsSystem || SelectedAnnouncement.Author?.ToLower() == "dev" || SelectedAnnouncement.Author?.ToLower() == "system";
+    var isProtected = isSys;
+    
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+                @if (SelectedAnnouncement.IsPriority)
+                {
+                    <span class="type-pill" style="background: rgba(255, 69, 58, 0.15); color: var(--danger-color); font-weight: 600;">@(CurrentLang == "en-US" ? "IMPORTANT" : "WAŻNE")</span>
+                }
+                @if (isSys)
+                {
+                    <span class="type-pill news-badge-system">
+                        🛠️ @(string.IsNullOrWhiteSpace(SelectedAnnouncement.Author) ? "SYSTEM" : SelectedAnnouncement.Author.ToUpper())
+                    </span>
+                }
+                else
+                {
+                    <span class="type-pill" style="background: rgba(249, 115, 22, 0.15); color: var(--color-starosta); font-weight: 600;">
+                        @SelectedAnnouncement.Author
+                    </span>
+                }
+            </div>
+            
+            <h2 class="modal-title">@SelectedAnnouncement.Title</h2>
+            
+            <div style="background: rgba(255,255,255,0.04); border-left: 3px solid @(isSys ? "#BF5AF2" : "var(--color-starosta)"); padding: 14px; border-radius: 10px; margin-bottom: 18px;">
+                <p style="margin: 0; color: var(--text-main); font-size: 0.95rem; line-height: 1.6; white-space: pre-wrap;">@SelectedAnnouncement.Content</p>
+            </div>
+            
+            <div class="modal-info-box">
+                <div class="modal-info-row">
+                    <span class="modal-info-label">@(CurrentLang == "en-US" ? "Added:" : "Dodano:")</span>
+                    <span>@SelectedAnnouncement.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                </div>
+                @if (SelectedAnnouncement.ExpireDate != default)
+                {
+                    <div class="modal-info-row">
+                        <span class="modal-info-label" style="color: var(--danger-color);">@(CurrentLang == "en-US" ? "Expires:" : "Wygasa:")</span>
+                        <span style="color: var(--danger-color);">@SelectedAnnouncement.ExpireDate.ToString("dd.MM.yyyy HH:mm")</span>
+                    </div>
+                }
+            </div>
+
+            @if (AppState.HasManagementPrivileges && !isProtected)
+            {
+                <div class="modal-actions-row" style="margin-top: 16px;">
+                    <button class="btn btn-danger" style="width: 100%; font-weight: 600;" @onclick="DeleteSelectedAnnouncement">@(CurrentLang == "en-US" ? "🗑️ Delete announcement" : "🗑️ Usuń to ogłoszenie")</button>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@* Modal dodawania *@
+@if (IsAddModalOpen)
+{
+    <div class="modal-overlay active" @onclick="CloseModals">
+        <div class="modal-content" @onclick:stopPropagation="true">
+            <div class="modal-sheet-handle"></div>
+            <button class="close-modal" @onclick="CloseModals">&times;</button>
+            
+            <h2 class="modal-title" style="color: var(--color-starosta);">@(CurrentLang == "en-US" ? "📢 New Announcement" : "📢 Nowe Ogłoszenie")</h2>
+            
+            <div class="form-group">
+                <label style="color: var(--text-main); font-weight: 600;">@(CurrentLang == "en-US" ? "Title" : "Tytuł")</label>
+                <input type="text" class="form-control" placeholder='@(CurrentLang == "en-US" ? "e.g. Room change" : "np. Zmiana sali")' @bind="newTitle" />
+            </div>
+            
+            <div class="form-group">
+                <label style="color: var(--text-main); font-weight: 600;">@(CurrentLang == "en-US" ? "Short preview (for list)" : "Krótki opis (na listę)")</label>
+                <input type="text" class="form-control" placeholder='@(CurrentLang == "en-US" ? "Classes moved to..." : "Zajęcia przeniesione...")' @bind="newShort" />
+            </div>
+            
+            <div class="form-group">
+                <label style="color: var(--text-main); font-weight: 600;">@(CurrentLang == "en-US" ? "Content" : "Treść ogłoszenia")</label>
+                <textarea class="form-control" rows="4" placeholder='@(CurrentLang == "en-US" ? "Detailed information..." : "Szczegółowe informacje...")' @bind="newContent"></textarea>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label style="color: var(--text-main); font-weight: 600;">@(CurrentLang == "en-US" ? "Expires on (Date)" : "Wygasa (data)")</label>
+                    <input type="date" class="form-control" style="color-scheme: dark;" @bind="newExpireDate" @bind:format="yyyy-MM-dd" min="2024-01-01" max="2035-12-31" />
+                </div>
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label style="color: var(--text-main); font-weight: 600;">@(CurrentLang == "en-US" ? "Expires at (Time)" : "Wygasa (godzina)")</label>
+                    <div style="display: flex; gap: 4px; align-items: center;">
+                        <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@newExpireTime.Hour" @onchange="OnExpireHourChanged">
+                            @for (int h = 0; h < 24; h++)
+                            {
+                                <option value="@h">@(h < 10 ? $"0{h}" : $"{h}")</option>
+                            }
+                        </select>
+                        <span style="font-weight: bold; color: var(--text-muted); flex-shrink: 0;">:</span>
+                        <select class="form-control" style="flex: 1; min-width: 0; background: var(--input-bg); border: 1px solid var(--border-color); color: var(--text-main); padding: 10px 4px; border-radius: 10px; text-align: center; font-weight: 600;" value="@newExpireTime.Minute" @onchange="OnExpireMinuteChanged">
+                            @for (int m = 0; m <= 59; m++)
+                            {
+                                <option value="@m">@(m < 10 ? $"0{m}" : $"{m}")</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background: rgba(255, 69, 58, 0.08); border-left: 3px solid var(--danger-color); padding: 12px 14px; border-radius: 8px; display: flex; align-items: center; gap: 10px; margin-top: 14px; margin-bottom: 16px;">
+                <input type="checkbox" style="width: 18px; height: 18px; accent-color: var(--danger-color); cursor: pointer;" @bind="newPriority" />
+                <div style="display: flex; flex-direction: column;">
+                    <label style="margin: 0; color: var(--danger-color); font-weight: 600; cursor: pointer;" @onclick="() => newPriority = !newPriority">@(CurrentLang == "en-US" ? "🚨 Mark as IMPORTANT (Urgent)" : "🚨 Oznacz jako WAŻNE (Wymaga uwagi)")</label>
+                    <span style="color: var(--text-muted); font-size: 0.8rem;">@(CurrentLang == "en-US" ? "Will be highlighted with an urgent badge" : "Wyświetli się ze specjalnym oznaczeniem")</span>
+                </div>
+            </div>
+            
+            <div class="modal-actions-row">
+                <button class="btn" style="background-color: var(--color-starosta); color: white; width: 100%; font-weight: 600;" @onclick="PublishAnnouncement">@(CurrentLang == "en-US" ? "Publish announcement" : "Opublikuj ogłoszenie")</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] public MainLayout? Layout { get; set; }
+    private List<Portal_Studenta.Services.AnnouncementItem> News = new();
+    private string CurrentLang = "pl-PL";
+
+    private bool IsDetailsModalOpen = false;
+    private bool IsAddModalOpen = false;
+    private Portal_Studenta.Services.AnnouncementItem? SelectedAnnouncement;
+
+    private string newTitle = ""; string newShort = ""; string newContent = "";
+    private bool newPriority = false;
+    private DateOnly newExpireDate = DateOnly.FromDateTime(DateTime.Today.AddDays(7));
+    private TimeOnly newExpireTime = new(23, 59);
+
+    private void OnExpireHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int h))
+            newExpireTime = new TimeOnly(h, newExpireTime.Minute);
+    }
+
+    private void OnExpireMinuteChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int m))
+            newExpireTime = new TimeOnly(newExpireTime.Hour, m);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentLang = AppState.Language;
+        await RefreshData();
+        AppState.OnChange += OnAppStateChanged;
+    }
+
+    private void OnAppStateChanged() 
+    {
+        CurrentLang = AppState.Language;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await RefreshData();
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Announcements] Błąd odświeżania: {ex.Message}");
+            }
+        });
+    }
+
+    private async Task RefreshData()
+    {
+        News = await AnnouncementService.GetAnnouncementsAsync();
+        StateHasChanged();
+    }
+
+    private void OpenDetailsModal(Portal_Studenta.Services.AnnouncementItem item) { SelectedAnnouncement = item; IsDetailsModalOpen = true; }
+    private void OpenAddModal()
+    {
+        newTitle = ""; newShort = ""; newContent = ""; newPriority = false;
+        newExpireDate = DateOnly.FromDateTime(DateTime.Today.AddDays(7));
+        newExpireTime = new(23, 59);
+        IsAddModalOpen = true;
+    }
+
+    private void CloseModals() { IsDetailsModalOpen = false; IsAddModalOpen = false; SelectedAnnouncement = null; }
+
+    private async Task PublishAnnouncement()
+    {
+        if (string.IsNullOrWhiteSpace(newTitle) || string.IsNullOrWhiteSpace(newContent))
+        {
+            Layout?.ShowToast(CurrentLang == "en-US" ? "Please fill in title and announcement content!" : "Wypełnij tytuł i szczegóły ogłoszenia!", MainLayout.ToastType.Error);
+            return;
+        }
+
+        await AnnouncementService.AddAnnouncementAsync(new Portal_Studenta.Services.AnnouncementItem
+        {
+            Title = newTitle,
+            ShortContent = newShort,
+            Content = newContent,
+            Author = AppState.IsStarosta ? "Starosta" : "Admin",
+            IsPriority = newPriority,
+            IsSystem = false,
+            ExpireDate = newExpireDate.ToDateTime(newExpireTime)
+        });
+
+        Layout?.ShowToast(CurrentLang == "en-US" ? "Announcement published successfully!" : "Ogłoszenie zostało pomyślnie dodane!");
+        await RefreshData();
+        CloseModals();
+    }
+
+    private async Task DeleteSelectedAnnouncement()
+    {
+        if (SelectedAnnouncement != null)
+        {
+            bool isProtected = SelectedAnnouncement.IsSystem || SelectedAnnouncement.Author.ToLower() == "dev" || SelectedAnnouncement.Author.ToLower() == "system";
+            if (AppState.HasManagementPrivileges && !isProtected)
+            {
+                await AnnouncementService.DeleteAnnouncementAsync(SelectedAnnouncement);
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Announcement deleted." : "Ogłoszenie zostało usunięte.", MainLayout.ToastType.Warning);
+                CloseModals();
+                await RefreshData();
+            }
+        }
+    }
+
+    public void Dispose() => AppState.OnChange -= OnAppStateChanged;
+}

@@ -1,0 +1,39 @@
+# ==============================================================================
+# UniAvio (Portal Studenta) - EditorConfig (.NET 10 MAUI & Blazor Hybrid)
+# ==============================================================================
+
+root = true
+
+# All files
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# C# source files
+[*.cs]
+indent_size = 4
+csharp_style_var_for_built_in_types = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = true:suggestion
+csharp_using_directive_placement = outside_namespace:suggestion
+dotnet_sort_system_directives_first = true
+
+# Razor & Blazor components
+[*.razor]
+indent_size = 4
+
+# XAML files
+[*.xaml]
+indent_size = 4
+
+# XML / Project files
+[*.{xml,csproj,props,targets,plist,resx}]
+indent_size = 4
+
+# Web frontend & configuration
+[*.{json,yaml,yml,css,js,html,md,http}]
+indent_size = 2

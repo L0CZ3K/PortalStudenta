@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="pl" data-theme="dark">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>UniAvio - Portal Studenta</title>
+    <base href="/" />
+
+    <link rel="stylesheet" href="Portal Studenta.styles.css" />
+
+    <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+    <div id="app">Ładowanie...</div>
+
+    <script src="_framework/blazor.webview.js"></script>
+    <script src="notes-editor.js"></script>
+</body>
+<script>
+    window.settingsManager = {
+        applyLightMode: function (isLight) {
+            if (isLight === 'true') {
+                document.body.classList.add('light-mode');
+            } else {
+                document.body.classList.remove('light-mode');
+            }
+        }
+    };
+
+    // DODAJ TO: Auto-ładowanie przy starcie aplikacji!
+    var isLight = localStorage.getItem('app_lightmode');
+    if (isLight === 'true') document.body.classList.add('light-mode');
+
+    var hex = localStorage.getItem('app_hex');
+    if (hex) document.documentElement.style.setProperty('--primary-color', hex);
+
+    window.getCalendarFitHourHeight = function (totalHours) {
+        var vh = window.innerHeight || document.documentElement.clientHeight;
+        var isMobile = (window.innerWidth || document.documentElement.clientWidth) < 768;
+        // Na mobile odliczamy topbar (~48px), tabbar (~65px), weekbar (~36px), footer (~32px) i marginesy
+        var overhead = isMobile ? 185 : 230;
+        var avail = Math.max(260, vh - overhead);
+        var perH = Math.floor(avail / Math.max(1, totalHours));
+        return Math.max(34, Math.min(65, perH));
+    };
+</script>
+</html>

@@ -1,0 +1,213 @@
+# ==============================================================================
+# UniAvio (Portal Studenta) - Production .gitignore (.NET 10 MAUI & Blazor Hybrid)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. CRITICAL: Security & Leak Prevention (Klucze, Tokeny, Certyfikaty)
+# ------------------------------------------------------------------------------
+# Lokalne klucze API i sekrety (USOS, serwery, testowe dane)
+*Secrets.Local.cs
+UsosSecrets.Local.cs
+*.local.cs
+*.local.json
+appsettings.*.local.json
+appsettings.local.json
+secrets.json
+.env
+.env.*
+*.env
+
+# Certyfikaty, klucze prywatne i keystore (Android / iOS / Mac)
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+*.p8
+*.mobileprovision
+*.keystore
+*.jks
+
+# Klucze chmurowe i service accounts (Firebase / GCP / Azure)
+service-account*.json
+firebase-adminsdk*.json
+*client_secret*.json
+
+# ------------------------------------------------------------------------------
+# 2. Lokalne bazy danych, pamięć podręczna i załączniki użytkownika
+# ------------------------------------------------------------------------------
+# Bazy SQLite
+*.db3
+*.db3-shm
+*.db3-wal
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Pamięć podręczna harmonogramu i modyfikacji
+usos_schedule_cache.json
+schedule_modifications.json
+custom_events_cache.json
+
+# Lokalne pliki załączników i zdjęć tablicy
+notes_attachments/
+*notes_attachments*/
+
+# ------------------------------------------------------------------------------
+# 3. Pliki robocze, zrzuty kontekstu i logi
+# ------------------------------------------------------------------------------
+context*.txt
+*_context.txt
+auth.txt
+build_output.txt
+*.dump
+scratch/
+*.log
+
+# ------------------------------------------------------------------------------
+# 4. Środowisko .NET & Wyniki kompilacji (Build Output)
+# ------------------------------------------------------------------------------
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+bld/
+artifacts/
+Generated\ Files/
+BenchmarkDotNet.Artifacts/
+
+# Pakiety NuGet i lokalne cache .NET
+*.nupkg
+*.snupkg
+*.nuget.props
+*.nuget.targets
+packages/
+.dotnet/
+.nuget/
+.local/
+.templateengine/
+Library/
+
+# Pliki tymczasowe kompilatora
+*.ilk
+*.meta
+*.obj
+*.iobj
+*.pch
+*.pdb
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tli
+*.tlh
+*.tmp
+*.tmp_proj
+*.binlog
+
+# ------------------------------------------------------------------------------
+# 5. IDE: JetBrains Rider / ReSharper
+# ------------------------------------------------------------------------------
+.idea/
+*.DotSettings.user
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.dotCover
+
+# ------------------------------------------------------------------------------
+# 6. IDE: Visual Studio & VS Code
+# ------------------------------------------------------------------------------
+.vs/
+*.suo
+*.user
+*.userprefs
+*.userosscache
+*.sln.docstates
+*.rsuser
+
+# VS Code (ignoruj ustawienia lokalne, zachowaj konfigurację współdzieloną)
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+
+# ------------------------------------------------------------------------------
+# 7. Narzędzia testowe i pokrycie kodu (MSTest, NUnit, Coverlet)
+# ------------------------------------------------------------------------------
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+TestResult.xml
+nunit-*.xml
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+
+# ------------------------------------------------------------------------------
+# 8. Platforma Apple (macOS, iOS, MacCatalyst, Xcode)
+# ------------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.AppleDB
+.AppleDesktop
+DerivedData/
+*.ipa
+*.xcarchive
+*.dSYM/
+*.dSYM.zip
+xcuserdata/
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+*.xccheckout
+*.moved-aside
+
+# ------------------------------------------------------------------------------
+# 9. Platforma Android
+# ------------------------------------------------------------------------------
+*.apk
+*.aab
+*.dex
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ------------------------------------------------------------------------------
+# 10. Platforma Windows
+# ------------------------------------------------------------------------------
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+*.appx
+*.appxbundle
+*.appxupload
+
+# ------------------------------------------------------------------------------
+# 11. Narzędzia AI, Agenci i Konfiguracje Asystentów (Prywatne / Nie do Gita)
+# ------------------------------------------------------------------------------
+.agents/
+GEMINI.md
+.gemini/
+CLAUDE.md
+.claude/
+.cursor/
+.cursorrules
+.vscode/
+

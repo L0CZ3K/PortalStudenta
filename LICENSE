@@ -1,0 +1,23 @@
+Copyright (c) 2026 UniAvio (Portal Studenta). Wszelkie prawa zastrzeżone / All Rights Reserved.
+
+Niniejsze repozytorium oraz cały zawarty w nim kod źródłowy, architektura, zasoby i dokumentacja zostały udostępnione w serwisie GitHub w celu:
+PEŁNEJ PRZEJRZYSTOŚCI I AUDYTU BEZPIECZEŃSTWA (TRANSPARENCY & AUDITING): 
+Aplikacja łączy się z uczelnianym systemem USOS. Kod źródłowy jest publicznie dostępny do wglądu, aby każdy student, pracownik naukowy oraz administrator uczelni mógł osobiście zweryfikować, że aplikacja nie wykrada danych, nie monitoruje użytkowników, a na żadnym zewnętrznym serwerze NIE SĄ PRZECHOWYWANE wrażliwe dane studentów (hasła, oceny, dane osobowe czy tokeny).
+
+KOD ŹRÓDŁOWY NIE JEST OPROGRAMOWANIEM TYPU OPEN-SOURCE.
+Upublicznienie kodu w celach audytu i weryfikacji prywatności nie jest tożsame z udzieleniem wolnej licencji.
+
+BEZWZGLĘDNIE ZABRANIA SIĘ:
+1. Kopiowania, modyfikowania, adaptowania, sublicencjonowania, publikowania lub redystrybucji kodu w całości lub w części w celach innych niż prywatny wgląd i audyt bezpieczeństwa.
+2. Używania oprogramowania, jego komponentów, logiki biznesowej ani architektury w celach komercyjnych, wdrożeniowych lub zarobkowych bez uprzedniej wyraźnej, pisemnej zgody autora.
+3. Tworzenia produktów zależnych lub powielania aplikacji pod inną marką.
+
+Oprogramowanie i kod są dostarczane w stanie „tak, jak jest” (AS-IS), bez jakiejkolwiek gwarancji, wyraźnej lub dorozumianej.
+
+---
+
+English Notice:
+This repository and its source code are published strictly for transparency and independent security auditing. 
+Because the application interacts with university systems (USOS), the source code is made public to allow anyone to verify that it does not harvest credentials and that NO SENSITIVE USER DATA is stored on any external server.
+
+All rights reserved. This is NOT open-source software. No permission or license is granted to copy, modify, distribute, host, deploy, or use this codebase or its derivatives for commercial, production, or unauthorized purposes without explicit prior written consent from the author.
