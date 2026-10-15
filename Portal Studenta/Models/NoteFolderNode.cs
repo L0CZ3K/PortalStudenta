@@ -19,6 +19,8 @@ namespace Portal_Studenta.Models
     {
         All,
         Pinned,
+        LocalOnly,
+        BetweenDevices,
         Shared,
         Uncategorized,
         Subject,

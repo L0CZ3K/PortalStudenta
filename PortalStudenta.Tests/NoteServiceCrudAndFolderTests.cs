@@ -400,5 +400,105 @@ namespace PortalStudenta.Tests
             Assert.DoesNotContain("VERY_HEAVY_BASE64_DATA", saved.Content);
             Assert.Contains(@"data-attachment-id=""xyz999""", saved.Content);
         }
+
+        [Fact]
+        public void SharingMode_DefaultsToBetweenDevices_AndMapsToIsSharedWithGroup()
+        {
+            var note = new Note();
+            Assert.Equal(NoteSharingMode.BetweenDevices, note.SharingMode);
+            Assert.False(note.IsSharedWithGroup);
+
+            note.SharingMode = NoteSharingMode.SharedWithAll;
+            Assert.True(note.IsSharedWithGroup);
+
+            note.IsSharedWithGroup = false;
+            Assert.Equal(NoteSharingMode.BetweenDevices, note.SharingMode);
+
+            note.SharingMode = NoteSharingMode.LocalOnly;
+            Assert.False(note.IsSharedWithGroup);
+
+            note.IsSharedWithGroup = true;
+            Assert.Equal(NoteSharingMode.SharedWithAll, note.SharingMode);
+        }
+
+        [Fact]
+        public void BuildFolderHierarchy_IncludesLocalOnlyAndBetweenDevicesCounts()
+        {
+            var service = new NoteService();
+            service.AddNote(new Note { Title = "N1", SharingMode = NoteSharingMode.LocalOnly });
+            service.AddNote(new Note { Title = "N2", SharingMode = NoteSharingMode.BetweenDevices });
+            service.AddNote(new Note { Title = "N3", SharingMode = NoteSharingMode.BetweenDevices });
+            service.AddNote(new Note { Title = "N4", SharingMode = NoteSharingMode.SharedWithAll });
+
+            var hierarchy = service.BuildFolderHierarchy(null);
+
+            var localNode = hierarchy.FirstOrDefault(f => f.FolderType == NoteFolderType.LocalOnly);
+            Assert.NotNull(localNode);
+            Assert.Equal(1, localNode.NoteCount);
+
+            var devicesNode = hierarchy.FirstOrDefault(f => f.FolderType == NoteFolderType.BetweenDevices);
+            Assert.NotNull(devicesNode);
+            Assert.Equal(2, devicesNode.NoteCount);
+
+            var sharedNode = hierarchy.FirstOrDefault(f => f.FolderType == NoteFolderType.Shared);
+            Assert.NotNull(sharedNode);
+            Assert.Equal(1, sharedNode.NoteCount);
+        }
+
+        [Fact]
+        public async Task SyncWithCloudAsync_MergesUserAndGroupCloudNotes_Correctly()
+        {
+            var service = new NoteService();
+            var cloudNoteId = Guid.NewGuid();
+            var groupNoteId = Guid.NewGuid();
+
+            var mockSync = new MockFirebaseNoteSync();
+            mockSync.UserNotes.Add(new Note
+            {
+                Id = cloudNoteId,
+                Title = "Z drugiego urządzenia",
+                Content = "Treść z telefonu",
+                SharingMode = NoteSharingMode.BetweenDevices,
+                UpdatedAt = DateTime.Now
+            });
+
+            mockSync.GroupNotes.Add(new Note
+            {
+                Id = groupNoteId,
+                Title = "Wspólna notatka grupy",
+                Content = "Wykład 1",
+                SharingMode = NoteSharingMode.SharedWithAll,
+                UpdatedAt = DateTime.Now
+            });
+
+            await service.SyncWithCloudAsync(mockSync, "12345", "GR_1");
+
+            var all = service.GetAllNotes();
+            Assert.Contains(all, n => n.Id == cloudNoteId && n.Title == "Z drugiego urządzenia");
+            Assert.Contains(all, n => n.Id == groupNoteId && n.Title == "Wspólna notatka grupy");
+        }
+
+        private class MockFirebaseNoteSync : IFirebaseNoteSync
+        {
+            public List<Note> UserNotes { get; } = new();
+            public List<Note> GroupNotes { get; } = new();
+            public List<Note> SyncedNotes { get; } = new();
+            public List<Guid> DeletedNotes { get; } = new();
+
+            public Task<List<Note>> GetUserNotesFromCloudAsync(string albumNumber) => Task.FromResult(UserNotes.ToList());
+            public Task SyncNoteToCloudAsync(string albumNumber, Note note)
+            {
+                SyncedNotes.Add(note);
+                return Task.CompletedTask;
+            }
+            public Task DeleteNoteFromCloudAsync(string albumNumber, Guid noteId)
+            {
+                DeletedNotes.Add(noteId);
+                return Task.CompletedTask;
+            }
+            public Task<List<Note>> GetGroupSharedNotesAsync(string groupCode) => Task.FromResult(GroupNotes.ToList());
+            public Task ShareNoteToGroupLobbyAsync(string groupCode, Note note) => Task.CompletedTask;
+            public Task UnshareNoteFromGroupLobbyAsync(string groupCode, Guid noteId) => Task.CompletedTask;
+        }
     }
 }

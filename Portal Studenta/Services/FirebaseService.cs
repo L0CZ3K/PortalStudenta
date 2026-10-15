@@ -46,7 +46,7 @@ namespace Portal_Studenta.Services
         public DateTime? DeletedAt { get; set; }
     }
 
-    public class FirebaseService : IDisposable
+    public class FirebaseService : IDisposable, IFirebaseNoteSync
     {
         private readonly FirebaseClient _firebase;
         private readonly Dictionary<string, IDisposable> _membershipSubscriptions = new();
@@ -1661,6 +1661,37 @@ namespace Portal_Studenta.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[FirebaseService] Błąd synchronizacji notatki w chmurze: {ex.Message}");
+            }
+        }
+
+        public async Task DeleteNoteFromCloudAsync(string albumNumber, Guid noteId)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber)) return;
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                var sNoteId = SanitizeKey(noteId.ToString());
+                await _firebase.Child("users").Child(sAlbum).Child("notes").Child(sNoteId).DeleteAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd usuwania notatki z chmury: {ex.Message}");
+            }
+        }
+
+        public async Task<List<Note>> GetUserNotesFromCloudAsync(string albumNumber)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber)) return new List<Note>();
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                var notes = await _firebase.Child("users").Child(sAlbum).Child("notes").OnceAsync<Note>();
+                return notes?.Select(n => n.Object).Where(n => n != null).ToList() ?? new List<Note>();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd pobierania notatek użytkownika z chmury: {ex.Message}");
+                return new List<Note>();
             }
         }
     }

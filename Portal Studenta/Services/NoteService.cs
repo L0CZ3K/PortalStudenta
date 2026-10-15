@@ -10,6 +10,16 @@ using SQLite;
 
 namespace Portal_Studenta.Services
 {
+    public interface IFirebaseNoteSync
+    {
+        Task<List<Note>> GetUserNotesFromCloudAsync(string albumNumber);
+        Task SyncNoteToCloudAsync(string albumNumber, Note note);
+        Task DeleteNoteFromCloudAsync(string albumNumber, Guid noteId);
+        Task<List<Note>> GetGroupSharedNotesAsync(string groupCode);
+        Task ShareNoteToGroupLobbyAsync(string groupCode, Note note);
+        Task UnshareNoteFromGroupLobbyAsync(string groupCode, Guid noteId);
+    }
+
     /// <summary>
     /// Service managing student academic notes, folder hierarchies, SQLite persistence,
     /// and tokenized inline attachments (whiteboard scans, photos, documents).
@@ -417,11 +427,29 @@ namespace Portal_Studenta.Services
 
             rootFolders.Add(new NoteFolderNode
             {
+                Id = "system_devices",
+                Name = "Moje urządzenia",
+                Icon = "📱💻",
+                FolderType = NoteFolderType.BetweenDevices,
+                NoteCount = allNotesSnapshot.Count(n => n.SharingMode == NoteSharingMode.BetweenDevices)
+            });
+
+            rootFolders.Add(new NoteFolderNode
+            {
+                Id = "system_local",
+                Name = "Tylko lokalnie",
+                Icon = "🔒",
+                FolderType = NoteFolderType.LocalOnly,
+                NoteCount = allNotesSnapshot.Count(n => n.SharingMode == NoteSharingMode.LocalOnly)
+            });
+
+            rootFolders.Add(new NoteFolderNode
+            {
                 Id = "system_shared",
                 Name = "Udostępnione w grupie",
                 Icon = "👥",
                 FolderType = NoteFolderType.Shared,
-                NoteCount = allNotesSnapshot.Count(n => n.IsSharedWithGroup)
+                NoteCount = allNotesSnapshot.Count(n => n.SharingMode == NoteSharingMode.SharedWithAll || n.IsSharedWithGroup)
             });
 
             rootFolders.Add(new NoteFolderNode
@@ -743,6 +771,78 @@ namespace Portal_Studenta.Services
             catch
             {
                 return "";
+            }
+        }
+
+        /// <summary>
+        /// Synchronizes notes between current device, user's private cloud (BetweenDevices),
+        /// and university group shared notes (SharedWithAll).
+        /// </summary>
+        public async Task SyncWithCloudAsync(IFirebaseNoteSync firebaseService, string? albumNumber, string? groupCode)
+        {
+            if (firebaseService == null) return;
+            await EnsureInitializedAsync();
+
+            try
+            {
+                var localNotesSnapshot = GetAllNotes();
+
+                // 1. Synchronizacja prywatna (Moje urządzenia - BetweenDevices & SharedWithAll)
+                if (!string.IsNullOrWhiteSpace(albumNumber))
+                {
+                    var cloudUserNotes = await firebaseService.GetUserNotesFromCloudAsync(albumNumber);
+                    var cloudMap = cloudUserNotes.ToDictionary(n => n.Id, n => n);
+
+                    foreach (var cloudNote in cloudUserNotes)
+                    {
+                        var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == cloudNote.Id);
+                        if (localMatch == null)
+                        {
+                            // Nowa notatka z drugiego urządzenia (np. utworzona na telefonie)
+                            AddNote(cloudNote);
+                        }
+                        else if (cloudNote.UpdatedAt > localMatch.UpdatedAt)
+                        {
+                            // Notatka w chmurze ma nowsze zmiany
+                            await SaveNoteAsync(cloudNote);
+                        }
+                        else if (localMatch.UpdatedAt > cloudNote.UpdatedAt && localMatch.SharingMode != NoteSharingMode.LocalOnly)
+                        {
+                            // Notatka lokalna jest nowsza – zaktualizuj chmurę
+                            await firebaseService.SyncNoteToCloudAsync(albumNumber, localMatch);
+                        }
+                    }
+
+                    // Wyślij lokalne notatki BetweenDevices/SharedWithAll, których jeszcze nie ma w chmurze
+                    foreach (var localNote in localNotesSnapshot.Where(n => n.SharingMode is NoteSharingMode.BetweenDevices or NoteSharingMode.SharedWithAll))
+                    {
+                        if (!cloudMap.ContainsKey(localNote.Id))
+                        {
+                            await firebaseService.SyncNoteToCloudAsync(albumNumber, localNote);
+                        }
+                    }
+                }
+
+                // 2. Synchronizacja grupowa (Udostępnione wszystkim - SharedWithAll)
+                if (!string.IsNullOrWhiteSpace(groupCode))
+                {
+                    var groupNotes = await firebaseService.GetGroupSharedNotesAsync(groupCode);
+                    foreach (var gNote in groupNotes)
+                    {
+                        var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == gNote.Id);
+                        if (localMatch == null)
+                        {
+                            gNote.SharingMode = NoteSharingMode.SharedWithAll;
+                            AddNote(gNote);
+                        }
+                    }
+                }
+
+                OnNotesChanged?.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NoteService] SyncWithCloudAsync error: {ex.Message}");
             }
         }
 

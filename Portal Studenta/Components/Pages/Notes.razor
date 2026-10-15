@@ -523,6 +523,64 @@
         border-color: rgba(234, 179, 8, 0.4) !important;
     }
 
+    .sharing-mode-selector {
+        display: inline-flex;
+        align-items: center;
+        background: rgba(120, 120, 128, 0.12);
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 2px;
+        gap: 2px;
+        margin-right: 4px;
+    }
+
+    .sharing-pill {
+        border: none;
+        background: transparent;
+        padding: 3px 8px;
+        border-radius: 6px;
+        font-size: 0.76rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: all 0.15s ease;
+        height: 24px;
+        white-space: nowrap;
+    }
+
+    .sharing-pill:hover {
+        color: var(--text-main);
+        background: var(--hover-bg);
+    }
+
+    .sharing-pill.active {
+        background: var(--card-bg);
+        color: var(--text-main);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+        font-weight: 700;
+    }
+
+    .sharing-pill.active.local {
+        color: #71717a;
+    }
+
+    .sharing-pill.active.devices {
+        color: #0284c7;
+    }
+
+    .sharing-pill.active.all {
+        color: var(--primary-color);
+    }
+
+    @@media (max-width: 640px) {
+        .sharing-pill-label {
+            display: none;
+        }
+    }
+
     .toolbar-separator {
         width: 1px;
         height: 18px;
@@ -1166,6 +1224,9 @@
                 <span>@(CurrentLang == "en-US" ? "Folders" : "Foldery")</span>
             </h2>
             <div style="display: flex; gap: 6px; align-items: center;">
+                <button class="btn btn-sm" @onclick="SyncNotesManualAsync" title="Synchronizuj notatki z chmurą" style="background: rgba(120, 120, 128, 0.15); border-radius: 8px; padding: 4px 8px; font-size: 0.82rem; color: var(--text-main);">
+                    @(isSyncingNotes ? "⏳" : "🔄")
+                </button>
                 @if (IsPhone)
                 {
                 <button class="btn btn-sm remote-cam-header-btn" @onclick="OpenPhoneTransmitModal" title="Prześlij zdjęcie z telefonu do komputera">
@@ -1182,7 +1243,7 @@
 
             <!-- Foldery systemowe -->
             <div class="folder-section-label">@(CurrentLang == "en-US" ? "Quick Access" : "Szybki dostęp")</div>
-            @foreach (var sysFolder in folderHierarchy.Where(f => f.FolderType is NoteFolderType.All or NoteFolderType.Pinned or NoteFolderType.Shared or NoteFolderType.Uncategorized))
+            @foreach (var sysFolder in folderHierarchy.Where(f => f.FolderType is NoteFolderType.All or NoteFolderType.Pinned or NoteFolderType.BetweenDevices or NoteFolderType.LocalOnly or NoteFolderType.Shared or NoteFolderType.Uncategorized))
             {
                 <div class="folder-item @(selectedFolder?.Id == sysFolder.Id ? "active" : "")" @onclick="() => SelectFolder(sysFolder)">
                     <div class="folder-info">
@@ -1309,9 +1370,17 @@
                             {
                                 <span class="note-badge-pill">@FormatShortBadge(note.Subject, note.LessonType, note.GroupName)</span>
                             }
-                            @if (note.IsSharedWithGroup)
+                            @if (note.SharingMode == NoteSharingMode.LocalOnly)
                             {
-                                <span class="note-badge-pill" style="color: var(--primary-color);">👥</span>
+                                <span class="note-badge-pill" title="Lokalnie na tym urządzeniu" style="color: var(--text-muted);">🔒</span>
+                            }
+                            else if (note.SharingMode == NoteSharingMode.BetweenDevices)
+                            {
+                                <span class="note-badge-pill" title="Synchronizowana między Twoimi urządzeniami" style="color: #0284c7;">📱💻</span>
+                            }
+                            else if (note.SharingMode == NoteSharingMode.SharedWithAll || note.IsSharedWithGroup)
+                            {
+                                <span class="note-badge-pill" title="Udostępniona wszystkim w grupie" style="color: var(--primary-color);">👥</span>
                             }
                         </div>
                     </div>
@@ -1336,11 +1405,25 @@
                     </button>
 
                     <div class="editor-header-actions">
+                        <div class="sharing-mode-selector" title="Zakres synchronizacji notatki">
+                            <button type="button" class="sharing-pill local @(activeNote.SharingMode == NoteSharingMode.LocalOnly ? "active" : "")" 
+                                    @onclick="() => SetSharingModeAsync(NoteSharingMode.LocalOnly)" 
+                                    title="Lokalnie: Notatka zapisana wyłącznie na tym urządzeniu (SQLite)">
+                                🔒 <span class="sharing-pill-label">Lokalnie</span>
+                            </button>
+                            <button type="button" class="sharing-pill devices @(activeNote.SharingMode == NoteSharingMode.BetweenDevices ? "active" : "")" 
+                                    @onclick="() => SetSharingModeAsync(NoteSharingMode.BetweenDevices)" 
+                                    title="Między urządzeniami: Prywatna chmura – dostępna na Twoim komputerze i telefonie">
+                                📱💻 <span class="sharing-pill-label">Urządzenia</span>
+                            </button>
+                            <button type="button" class="sharing-pill all @(activeNote.SharingMode == NoteSharingMode.SharedWithAll ? "active" : "")" 
+                                    @onclick="() => SetSharingModeAsync(NoteSharingMode.SharedWithAll)" 
+                                    title="Udostępnij wszystkim: Widoczna dla wszystkich studentów w grupie">
+                                👥 <span class="sharing-pill-label">Wszyscy</span>
+                            </button>
+                        </div>
                         <button class="toolbar-tool-btn @(activeNote.IsPinned ? "active" : "")" @onclick="TogglePinActiveNote" title="Przypnij notatkę">
                             📌
-                        </button>
-                        <button class="toolbar-tool-btn @(activeNote.IsSharedWithGroup ? "active" : "")" @onclick="ToggleShareActiveNote" title="Udostępnij w Lobby grupy">
-                            👥
                         </button>
                         <button class="toolbar-tool-btn" @onclick="DeleteActiveNote" title="Usuń notatkę" style="color: var(--danger-color);">
                             🗑️
@@ -1697,6 +1780,7 @@
 
     private bool showRemoteCameraModal = false;
     private bool isCameraWaiting = false;
+    private bool isSyncingNotes = false;
     private System.Timers.Timer? cameraPollTimer;
 
     private bool showPhoneTransmitModal = false;
@@ -1720,7 +1804,9 @@
                 {
                     NoteFolderType.All => notes,
                     NoteFolderType.Pinned => notes.Where(n => n.IsPinned).ToList(),
-                    NoteFolderType.Shared => notes.Where(n => n.IsSharedWithGroup).ToList(),
+                    NoteFolderType.BetweenDevices => notes.Where(n => n.SharingMode == NoteSharingMode.BetweenDevices).ToList(),
+                    NoteFolderType.LocalOnly => notes.Where(n => n.SharingMode == NoteSharingMode.LocalOnly).ToList(),
+                    NoteFolderType.Shared => notes.Where(n => n.SharingMode == NoteSharingMode.SharedWithAll || n.IsSharedWithGroup).ToList(),
                     NoteFolderType.Uncategorized => notes.Where(n => string.IsNullOrWhiteSpace(n.Subject)).ToList(),
                     NoteFolderType.Subject => notes.Where(n => string.Equals(n.Subject, selectedFolder.Subject, StringComparison.OrdinalIgnoreCase)).ToList(),
                     NoteFolderType.LessonType => notes.Where(n =>
@@ -1764,9 +1850,31 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && IsDesktop)
+        if (firstRender)
         {
-            _ = Task.Run(async () => await InitLocalCameraServerAsync());
+            if (IsDesktop)
+            {
+                _ = Task.Run(async () => await InitLocalCameraServerAsync());
+            }
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var alb = GetCurrentStudentAlbum();
+                    var grp = AppState.GroupCode;
+                    await NoteService.SyncWithCloudAsync(FirebaseService, alb, grp);
+                    await InvokeAsync(() =>
+                    {
+                        RefreshHierarchy();
+                        StateHasChanged();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Notes] Initial cloud sync error: {ex.Message}");
+                }
+            });
         }
 
         if (activeNote != null)
@@ -1949,10 +2057,14 @@
             Title = CurrentLang == "en-US" ? "Quick Note" : "Nowa notatka",
             Content = "",
             CreatedAt = DateTime.Now,
-            UpdatedAt = DateTime.Now
+            UpdatedAt = DateTime.Now,
+            SharingMode = selectedFolder?.FolderType == NoteFolderType.LocalOnly 
+                ? NoteSharingMode.LocalOnly 
+                : (selectedFolder?.FolderType == NoteFolderType.Shared ? NoteSharingMode.SharedWithAll : NoteSharingMode.BetweenDevices)
         };
 
         NoteService.AddNote(newNote);
+        SyncNoteIfCloudEnabled(newNote);
         activeNote = newNote;
         mobileDepth = 2;
         _ = UpdateEditorContentAsync();
@@ -1966,7 +2078,10 @@
             Title = CurrentLang == "en-US" ? "New Note" : "Nowa notatka",
             Content = "",
             CreatedAt = DateTime.Now,
-            UpdatedAt = DateTime.Now
+            UpdatedAt = DateTime.Now,
+            SharingMode = selectedFolder?.FolderType == NoteFolderType.LocalOnly 
+                ? NoteSharingMode.LocalOnly 
+                : (selectedFolder?.FolderType == NoteFolderType.Shared ? NoteSharingMode.SharedWithAll : NoteSharingMode.BetweenDevices)
         };
 
         if (selectedFolder != null)
@@ -1977,6 +2092,7 @@
         }
 
         NoteService.AddNote(newNote);
+        SyncNoteIfCloudEnabled(newNote);
         activeNote = newNote;
         mobileDepth = 2;
         _ = UpdateEditorContentAsync();
@@ -1990,6 +2106,7 @@
         {
             activeNote.Content = htmlContent;
             await NoteService.SaveNoteAsync(activeNote);
+            SyncNoteIfCloudEnabled(activeNote);
         }
         else if (Guid.TryParse(noteId, out var parsedId))
         {
@@ -1998,6 +2115,7 @@
             {
                 note.Content = htmlContent;
                 await NoteService.SaveNoteAsync(note);
+                SyncNoteIfCloudEnabled(note);
             }
         }
     }
@@ -2021,6 +2139,7 @@
                 if (activeNote != null)
                 {
                     await NoteService.SaveNoteAsync(activeNote);
+                    SyncNoteIfCloudEnabled(activeNote);
                     _ = BroadcastCameraStateAsync();
                 }
             }
@@ -2088,25 +2207,99 @@
         }
     }
 
-    private async Task ToggleShareActiveNote()
+    private async Task SetSharingModeAsync(NoteSharingMode mode)
     {
-        if (activeNote != null)
+        if (activeNote == null) return;
+        var previousMode = activeNote.SharingMode;
+        activeNote.SharingMode = mode;
+        activeNote.UpdatedAt = DateTime.Now;
+        if (mode == NoteSharingMode.SharedWithAll)
         {
-            activeNote.IsSharedWithGroup = !activeNote.IsSharedWithGroup;
             activeNote.SharedGroupCode = AppState.GroupCode;
-            await NoteService.SaveNoteAsync(activeNote);
+        }
 
-            if (!string.IsNullOrWhiteSpace(AppState.GroupCode))
+        await NoteService.SaveNoteAsync(activeNote);
+
+        var album = GetCurrentStudentAlbum();
+        var group = AppState.GroupCode;
+
+        _ = Task.Run(async () =>
+        {
+            try
             {
-                if (activeNote.IsSharedWithGroup)
+                if (mode == NoteSharingMode.LocalOnly)
                 {
-                    await FirebaseService.ShareNoteToGroupLobbyAsync(AppState.GroupCode, activeNote);
+                    if (!string.IsNullOrWhiteSpace(album))
+                        await FirebaseService.DeleteNoteFromCloudAsync(album, activeNote.Id);
+                    if (!string.IsNullOrWhiteSpace(group))
+                        await FirebaseService.UnshareNoteFromGroupLobbyAsync(group, activeNote.Id);
                 }
-                else
+                else if (mode == NoteSharingMode.BetweenDevices)
                 {
-                    await FirebaseService.UnshareNoteFromGroupLobbyAsync(AppState.GroupCode, activeNote.Id);
+                    if (!string.IsNullOrWhiteSpace(album))
+                        await FirebaseService.SyncNoteToCloudAsync(album, activeNote);
+                    if (!string.IsNullOrWhiteSpace(group) && previousMode == NoteSharingMode.SharedWithAll)
+                        await FirebaseService.UnshareNoteFromGroupLobbyAsync(group, activeNote.Id);
+                }
+                else if (mode == NoteSharingMode.SharedWithAll)
+                {
+                    if (!string.IsNullOrWhiteSpace(album))
+                        await FirebaseService.SyncNoteToCloudAsync(album, activeNote);
+                    if (!string.IsNullOrWhiteSpace(group))
+                        await FirebaseService.ShareNoteToGroupLobbyAsync(group, activeNote);
                 }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Notes] SetSharingModeAsync cloud error: {ex.Message}");
+            }
+        });
+
+        RefreshHierarchy();
+        StateHasChanged();
+    }
+
+    private void SyncNoteIfCloudEnabled(Note note)
+    {
+        if (note.SharingMode == NoteSharingMode.LocalOnly) return;
+        var album = GetCurrentStudentAlbum();
+        var group = AppState.GroupCode;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(album))
+                    await FirebaseService.SyncNoteToCloudAsync(album, note);
+                if (note.SharingMode == NoteSharingMode.SharedWithAll && !string.IsNullOrWhiteSpace(group))
+                    await FirebaseService.ShareNoteToGroupLobbyAsync(group, note);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Notes] SyncNoteIfCloudEnabled error: {ex.Message}");
+            }
+        });
+    }
+
+    private async Task SyncNotesManualAsync()
+    {
+        if (isSyncingNotes) return;
+        isSyncingNotes = true;
+        StateHasChanged();
+
+        try
+        {
+            var alb = GetCurrentStudentAlbum();
+            var grp = AppState.GroupCode;
+            await NoteService.SyncWithCloudAsync(FirebaseService, alb, grp);
+            RefreshHierarchy();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] Manual sync error: {ex.Message}");
+        }
+        finally
+        {
+            isSyncingNotes = false;
             StateHasChanged();
         }
     }
@@ -2118,6 +2311,24 @@
             var noteToDelete = activeNote;
             activeNote = null;
             await NoteService.DeleteNoteAsync(noteToDelete.Id);
+
+            var alb = GetCurrentStudentAlbum();
+            var grp = AppState.GroupCode;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(alb))
+                        await FirebaseService.DeleteNoteFromCloudAsync(alb, noteToDelete.Id);
+                    if (!string.IsNullOrWhiteSpace(grp))
+                        await FirebaseService.UnshareNoteFromGroupLobbyAsync(grp, noteToDelete.Id);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Notes] Delete cloud sync error: {ex.Message}");
+                }
+            });
+
             activeNote = FilteredNotes.FirstOrDefault();
             if (activeNote == null)
             {

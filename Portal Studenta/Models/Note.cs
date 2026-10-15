@@ -5,6 +5,13 @@ using SQLite;
 
 namespace Portal_Studenta.Models
 {
+    public enum NoteSharingMode
+    {
+        LocalOnly = 0,        // 🔒 Lokalnie (tylko na tym urządzeniu)
+        BetweenDevices = 1,   // 📱💻 Między moimi urządzeniami (prywatna chmura mojego konta)
+        SharedWithAll = 2     // 👥 Udostępnij wszystkim (w grupie studenckiej)
+    }
+
     public class Note
     {
         [PrimaryKey]
@@ -28,7 +35,20 @@ namespace Portal_Studenta.Models
 
         // Flagi i integracja z chmurą / grupą
         public bool IsPinned { get; set; }
-        public bool IsSharedWithGroup { get; set; }
+
+        [Indexed]
+        public NoteSharingMode SharingMode { get; set; } = NoteSharingMode.BetweenDevices;
+
+        public bool IsSharedWithGroup
+        {
+            get => SharingMode == NoteSharingMode.SharedWithAll;
+            set
+            {
+                if (value) SharingMode = NoteSharingMode.SharedWithAll;
+                else if (SharingMode == NoteSharingMode.SharedWithAll) SharingMode = NoteSharingMode.BetweenDevices;
+            }
+        }
+
         public string SharedGroupCode { get; set; } = string.Empty;
         public string CourseId { get; set; } = string.Empty;
 
