@@ -2122,17 +2122,68 @@
         if (!note.Content.Contains("data-attachment-id", StringComparison.OrdinalIgnoreCase)) return note.Content;
 
         var html = note.Content;
-        if (note.Attachments != null && note.Attachments.Count > 0)
+        var attachmentsDir = NoteService.GetAttachmentsDirectory();
+
+        // Krok 1: Wykryj wszystkie atrybuty data-attachment-id obecne w treści HTML
+        var regex = new System.Text.RegularExpressions.Regex(@"data-attachment-id=[""']([a-zA-Z0-9_\-]+)[""']", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var matches = regex.Matches(html);
+
+        var noteAttachments = note.Attachments ?? new List<NoteAttachment>();
+        bool noteModified = false;
+
+        foreach (System.Text.RegularExpressions.Match match in matches)
         {
-            foreach (var att in note.Attachments)
+            var attId = match.Groups[1].Value;
+            if (string.IsNullOrWhiteSpace(attId)) continue;
+
+            // Szukaj załącznika na liście notatki
+            var att = noteAttachments.FirstOrDefault(a => string.Equals(a.Id, attId, StringComparison.OrdinalIgnoreCase));
+
+            // Self-healing: Jeśli załącznika brakuje w liście notatki, przeszukaj dysk w poszukiwaniu pliku
+            if (att == null)
             {
-                if (string.IsNullOrEmpty(att.Id)) continue;
-                var uri = GetCachedThumbUri(att);
-                if (string.IsNullOrEmpty(uri))
+                var candidateFiles = Directory.Exists(attachmentsDir) ? Directory.GetFiles(attachmentsDir, $"*{attId}*") : Array.Empty<string>();
+                var candidate = candidateFiles.FirstOrDefault(f => !f.EndsWith("_thumb.jpg", StringComparison.OrdinalIgnoreCase)) ?? candidateFiles.FirstOrDefault();
+
+                if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
+                {
+                    att = new NoteAttachment
+                    {
+                        Id = attId,
+                        FileName = Path.GetFileName(candidate),
+                        ContentType = candidate.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg",
+                        LocalPath = candidate,
+                        ThumbnailPath = candidateFiles.FirstOrDefault(f => f.EndsWith("_thumb.jpg", StringComparison.OrdinalIgnoreCase)) ?? candidate,
+                        SizeBytes = new FileInfo(candidate).Length,
+                        UploadedAt = File.GetCreationTimeUtc(candidate)
+                    };
+
+                    noteAttachments.Add(att);
+                    noteModified = true;
+                }
+            }
+
+            // Pobierz Data URI dla tego obrazu
+            string uri = "";
+            if (att != null)
+            {
+                if (_thumbnailCache.TryGetValue(att.Id, out var cached) && !string.IsNullOrEmpty(cached))
+                {
+                    uri = cached;
+                }
+                else
                 {
                     var path = !string.IsNullOrEmpty(att.ThumbnailPath) && File.Exists(att.ThumbnailPath)
                         ? att.ThumbnailPath
                         : att.LocalPath;
+
+                    // Fallback jeśli path na dysku ma inną ścieżkę bazową (np. po przeniesieniu sandboxa)
+                    if (string.IsNullOrEmpty(path) || !File.Exists(path))
+                    {
+                        var candidateFiles = Directory.Exists(attachmentsDir) ? Directory.GetFiles(attachmentsDir, $"*{attId}*") : Array.Empty<string>();
+                        path = candidateFiles.FirstOrDefault(f => !f.EndsWith("_thumb.jpg", StringComparison.OrdinalIgnoreCase)) ?? candidateFiles.FirstOrDefault();
+                    }
+
                     if (!string.IsNullOrEmpty(path) && File.Exists(path))
                     {
                         uri = await NoteService.GetAttachmentDataUriAsync(path, att.ContentType);
@@ -2142,23 +2193,29 @@
                         }
                     }
                 }
+            }
 
-                if (!string.IsNullOrEmpty(uri))
+            if (!string.IsNullOrEmpty(uri))
+            {
+                var pattern = $@"<img([^>]*\bdata-attachment-id=[""']{attId}[""'][^>]*)>";
+                html = System.Text.RegularExpressions.Regex.Replace(html, pattern, m =>
                 {
-                    // Wstrzyknij src do taga z atrybutem data-attachment-id="{att.Id}"
-                    var pattern = $@"<img([^>]*\bdata-attachment-id=[""']{att.Id}[""'][^>]*)>";
-                    html = System.Text.RegularExpressions.Regex.Replace(html, pattern, m =>
+                    var tag = m.Value;
+                    if (!tag.Contains("src=", StringComparison.OrdinalIgnoreCase))
                     {
-                        var tag = m.Value;
-                        if (!tag.Contains("src=", StringComparison.OrdinalIgnoreCase))
-                        {
-                            return tag.Insert(4, $" src=\"{uri}\"");
-                        }
-                        return System.Text.RegularExpressions.Regex.Replace(tag, @"src=""[^""]*""", $"src=\"{uri}\"");
-                    }, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                }
+                        return tag.Insert(4, $" src=\"{uri}\"");
+                    }
+                    return System.Text.RegularExpressions.Regex.Replace(tag, @"src=""[^""]*""", $"src=\"{uri}\"");
+                }, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
             }
         }
+
+        if (noteModified)
+        {
+            note.Attachments = noteAttachments;
+            await NoteService.SaveNoteAsync(note);
+        }
+
         return html;
     }
 
@@ -2227,6 +2284,14 @@
         if (activeNote != null && activeNote.Id.ToString() == noteId)
         {
             activeNote.Content = htmlContent;
+
+            // Zabezpieczenie: jeśli w serwisie są nowsze załączniki, nie nadpisuj ich przestarzałą listą
+            var freshNote = NoteService.GetAllNotes().FirstOrDefault(n => n.Id == activeNote.Id);
+            if (freshNote?.Attachments != null && freshNote.Attachments.Count > activeNote.Attachments.Count)
+            {
+                activeNote.Attachments = freshNote.Attachments;
+            }
+
             await NoteService.SaveNoteAsync(activeNote);
             SyncNoteIfCloudEnabled(activeNote);
         }
@@ -2263,6 +2328,15 @@
                 {
                     attachmentId = savedAtt.Id;
                     dataUri = await NoteService.GetAttachmentDataUriAsync(savedAtt.LocalPath, savedAtt.ContentType);
+                    lock (activeNote)
+                    {
+                        var attList = activeNote.Attachments;
+                        if (!attList.Any(a => a.Id == savedAtt.Id))
+                        {
+                            attList.Add(savedAtt);
+                            activeNote.Attachments = attList;
+                        }
+                    }
                 }
             });
 
@@ -2683,6 +2757,15 @@
                     {
                         attachmentId = savedAtt.Id;
                         dataUri = await NoteService.GetAttachmentDataUriAsync(savedAtt.LocalPath, savedAtt.ContentType);
+                        lock (activeNote)
+                        {
+                            var attList = activeNote.Attachments;
+                            if (!attList.Any(a => a.Id == savedAtt.Id))
+                            {
+                                attList.Add(savedAtt);
+                                activeNote.Attachments = attList;
+                            }
+                        }
                     }
                 });
 
@@ -2750,6 +2833,15 @@
                     {
                         attachmentId = savedAtt.Id;
                         dataUri = await NoteService.GetAttachmentDataUriAsync(savedAtt.LocalPath, savedAtt.ContentType);
+                        lock (activeNote)
+                        {
+                            var attList = activeNote.Attachments;
+                            if (!attList.Any(a => a.Id == savedAtt.Id))
+                            {
+                                attList.Add(savedAtt);
+                                activeNote.Attachments = attList;
+                            }
+                        }
                     }
                 });
 
@@ -2822,6 +2914,18 @@
                 if (!string.IsNullOrEmpty(att.LocalPath) && File.Exists(att.LocalPath))
                 {
                     uri = await NoteService.GetAttachmentDataUriAsync(att.LocalPath, att.ContentType);
+                }
+
+                if (string.IsNullOrEmpty(uri))
+                {
+                    var attachmentsDir = NoteService.GetAttachmentsDirectory();
+                    var candidateFiles = Directory.Exists(attachmentsDir) ? Directory.GetFiles(attachmentsDir, $"*{att.Id}*") : Array.Empty<string>();
+                    var candidate = candidateFiles.FirstOrDefault(f => !f.EndsWith("_thumb.jpg", StringComparison.OrdinalIgnoreCase)) ?? candidateFiles.FirstOrDefault();
+                    if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
+                    {
+                        att.LocalPath = candidate;
+                        uri = await NoteService.GetAttachmentDataUriAsync(candidate, att.ContentType);
+                    }
                 }
 
                 if (string.IsNullOrEmpty(uri))
@@ -3140,6 +3244,15 @@
                         attachmentId = savedAtt.Id;
                         var base64 = Convert.ToBase64String(bytes);
                         dataUri = $"data:{contentType};base64,{base64}";
+                        lock (activeNote)
+                        {
+                            var attList = activeNote.Attachments;
+                            if (!attList.Any(a => a.Id == savedAtt.Id))
+                            {
+                                attList.Add(savedAtt);
+                                activeNote.Attachments = attList;
+                            }
+                        }
                     }
                 });
 
@@ -3615,14 +3728,46 @@
                 );
             }
 
+            // Self-healing: przeszukaj dysk w poszukiwaniu pliku powiązanego z attachmentId
+            if (matchedAtt == null && !string.IsNullOrEmpty(attachmentId))
+            {
+                var attachmentsDir = NoteService.GetAttachmentsDirectory();
+                var candidateFiles = Directory.Exists(attachmentsDir) ? Directory.GetFiles(attachmentsDir, $"*{attachmentId}*") : Array.Empty<string>();
+                var candidate = candidateFiles.FirstOrDefault(f => !f.EndsWith("_thumb.jpg", StringComparison.OrdinalIgnoreCase)) ?? candidateFiles.FirstOrDefault();
+                if (!string.IsNullOrEmpty(candidate) && File.Exists(candidate))
+                {
+                    matchedAtt = new NoteAttachment
+                    {
+                        Id = attachmentId,
+                        FileName = Path.GetFileName(candidate),
+                        ContentType = candidate.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "image/png" : "image/jpeg",
+                        LocalPath = candidate,
+                        ThumbnailPath = candidateFiles.FirstOrDefault(f => f.EndsWith("_thumb.jpg", StringComparison.OrdinalIgnoreCase)) ?? candidate,
+                        SizeBytes = new FileInfo(candidate).Length,
+                        UploadedAt = File.GetCreationTimeUtc(candidate)
+                    };
+                    if (activeNote != null)
+                    {
+                        var list = activeNote.Attachments;
+                        list.Add(matchedAtt);
+                        activeNote.Attachments = list;
+                        _ = NoteService.SaveNoteAsync(activeNote);
+                    }
+                }
+            }
+
             if (matchedAtt != null)
             {
                 await OnAttachmentClick(matchedAtt, imageSrc);
                 return;
             }
 
-            var finalSrc = !string.IsNullOrEmpty(imageSrc) ? imageSrc : attachmentId;
-            if (string.IsNullOrEmpty(finalSrc)) return;
+            // Jeśli to inline data URI lub URL zewnętrzny (bez pliku na dysku)
+            var finalSrc = imageSrc;
+            if (string.IsNullOrEmpty(finalSrc) || !(finalSrc.StartsWith("data:image", StringComparison.OrdinalIgnoreCase) || finalSrc.StartsWith("http", StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
 
             lightboxImageUri = finalSrc;
 
