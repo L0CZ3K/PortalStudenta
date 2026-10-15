@@ -252,18 +252,91 @@ window.notesEditor = {
         };
 
         // Nasłuchiwanie kliknięć w checkboxy oraz wstawione obrazy (lightbox)
-        editorEl.onclick = function (e) {
-            if (e.target && e.target.type === 'checkbox') {
-                self.onChecklistToggle(e.target);
+        function handleImageOrCheckboxClick(e) {
+            var target = e.target;
+            if (!target) return;
+
+            if (target.type === 'checkbox') {
+                self.onChecklistToggle(target);
+                return;
             }
-            if (e.target && e.target.tagName === 'IMG' && e.target.classList.contains('note-inline-image')) {
+
+            var img = target.tagName === 'IMG' ? target : (target.closest ? target.closest('img') : null);
+            if (img && (img === editorEl || editorEl.contains(img))) {
+                e.preventDefault();
+                e.stopPropagation();
                 if (self.currentDotNetHelper) {
-                    var attId = e.target.getAttribute('data-attachment-id') || '';
-                    var src = e.target.getAttribute('src') || '';
-                    self.currentDotNetHelper.invokeMethodAsync('OnInlineImageClicked', attId || src);
+                    var attId = img.getAttribute('data-attachment-id') || '';
+                    var src = img.getAttribute('src') || '';
+                    self.currentDotNetHelper.invokeMethodAsync('OnInlineImageClicked', attId, src);
                 }
             }
-        };
+        }
+
+        editorEl.addEventListener('click', handleImageOrCheckboxClick);
+        editorEl.addEventListener('dblclick', handleImageOrCheckboxClick);
+
+        // Obsługa dotyku na urządzeniach mobilnych (iOS / iPadOS) wewnątrz contenteditable
+        var touchStartX = 0, touchStartY = 0, touchStartTime = 0;
+        editorEl.addEventListener('touchstart', function (e) {
+            if (e.touches && e.touches.length === 1) {
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                touchStartTime = Date.now();
+            }
+        }, { passive: true });
+
+        editorEl.addEventListener('touchend', function (e) {
+            self.saveSelection();
+            if (e.changedTouches && e.changedTouches.length === 1) {
+                var dx = Math.abs(e.changedTouches[0].clientX - touchStartX);
+                var dy = Math.abs(e.changedTouches[0].clientY - touchStartY);
+                var dt = Date.now() - touchStartTime;
+                if (dx < 14 && dy < 14 && dt < 450) {
+                    var target = document.elementFromPoint(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+                    var img = target && (target.tagName === 'IMG' ? target : (target.closest ? target.closest('img') : null));
+                    if (img && editorEl.contains(img)) {
+                        e.preventDefault();
+                        if (self.currentDotNetHelper) {
+                            var attId = img.getAttribute('data-attachment-id') || '';
+                            var src = img.getAttribute('src') || '';
+                            self.currentDotNetHelper.invokeMethodAsync('OnInlineImageClicked', attId, src);
+                        }
+                    }
+                }
+            }
+        });
+
+        // Globalny przechwytywacz kliknięć w fazie capturing dla obrazów w edytorze
+        if (!window.__notesGlobalImageListenerAttached) {
+            window.__notesGlobalImageListenerAttached = true;
+            document.addEventListener('click', function (e) {
+                var target = e.target;
+                if (!target) return;
+                var editor = self.closest(target, '.notes-rich-editor');
+                if (!editor) return;
+
+                var img = target.tagName === 'IMG' ? target : (target.closest ? target.closest('img') : null);
+                if (img && editor.contains(img)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (self.currentDotNetHelper) {
+                        var attId = img.getAttribute('data-attachment-id') || '';
+                        var src = img.getAttribute('src') || '';
+                        self.currentDotNetHelper.invokeMethodAsync('OnInlineImageClicked', attId, src);
+                    }
+                }
+            }, true);
+
+            window.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape') {
+                    var lightboxClose = document.querySelector('.image-lightbox-overlay .lightbox-close-btn');
+                    if (lightboxClose) {
+                        lightboxClose.click();
+                    }
+                }
+            });
+        }
 
         // Pokoloruj składnię istniejących bloków kodu po zainicjowaniu
         setTimeout(function () {
@@ -276,6 +349,7 @@ window.notesEditor = {
      */
     setContent: function (editorEl, html, noteId) {
         if (!editorEl) return;
+        this.editorEl = editorEl;
         clearTimeout(this.debounceTimer);
         if (noteId !== undefined && noteId !== null) {
             this.currentNoteId = noteId;

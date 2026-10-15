@@ -682,11 +682,14 @@
         margin: 10px 0;
         display: block;
         box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
-        cursor: pointer;
+        cursor: zoom-in !important;
+        user-select: none !important;
+        -webkit-user-select: none !important;
         transition: transform 0.15s ease, box-shadow 0.15s ease;
     }
 
     .notes-rich-editor img.note-inline-image:hover,
+    .notes-rich-editor img:hover,
     .note-inline-image:hover {
         transform: scale(1.006);
         box-shadow: 0 6px 22px rgba(0, 0, 0, 0.18);
@@ -977,6 +980,33 @@
         display: flex;
         align-items: center;
         gap: 10px;
+    }
+
+    .lightbox-system-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(255, 255, 255, 0.14);
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        color: #ffffff;
+        font-size: 0.82rem;
+        font-weight: 600;
+        padding: 6px 14px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        user-select: none;
+    }
+
+    .lightbox-system-btn:hover {
+        background: var(--primary-color, #0a84ff);
+        border-color: var(--primary-color, #0a84ff);
+        color: #ffffff;
+        transform: translateY(-1px);
+    }
+
+    .lightbox-system-btn:active {
+        transform: translateY(0);
     }
 
     .lightbox-close-btn {
@@ -1592,21 +1622,33 @@
                 <div class="image-lightbox-header">
                     <div class="lightbox-title-wrap">
                         <span class="lightbox-title">@activeLightboxAttachment.FileName</span>
-                        <span class="lightbox-size">@WhiteboardImageOptimizer.FormatBytes(activeLightboxAttachment.SizeBytes)</span>
+                        @if (activeLightboxAttachment.SizeBytes > 0)
+                        {
+                            <span class="lightbox-size">@WhiteboardImageOptimizer.FormatBytes(activeLightboxAttachment.SizeBytes)</span>
+                        }
                     </div>
                     <div class="lightbox-actions">
-                        <button class="btn btn-sm btn-outline-light" @onclick="() => OpenAttachmentInSystem(activeLightboxAttachment)">Otwórz w systemie</button>
-                        <button class="lightbox-close-btn" @onclick="CloseLightbox">✕</button>
+                        <button type="button" class="lightbox-system-btn" @onclick="() => OpenAttachmentInSystem(activeLightboxAttachment)"
+                                title='@(CurrentLang == "en-US" ? "Open in default system app (Preview / Photos)" : "Otwórz w domyślnej aplikacji systemowej (np. Podgląd / Zdjęcia)")'>
+                            <span>↗️</span>
+                            <span>@(CurrentLang == "en-US" ? "Open in System" : "Otwórz w systemie")</span>
+                        </button>
+                        <button type="button" class="lightbox-close-btn" @onclick="CloseLightbox" title='@(CurrentLang == "en-US" ? "Close preview (Esc)" : "Zamknij podgląd (Esc)")'>✕</button>
                     </div>
                 </div>
                 <div class="image-lightbox-body">
                     @if (!string.IsNullOrEmpty(lightboxImageUri))
                     {
-                        <img src="@lightboxImageUri" class="image-lightbox-img" alt="@activeLightboxAttachment.FileName" />
+                        <img src="@lightboxImageUri" class="image-lightbox-img" alt="@activeLightboxAttachment.FileName"
+                             title='@(CurrentLang == "en-US" ? "Double-click to open in system viewer" : "Kliknij dwukrotnie, aby otworzyć w systemie")'
+                             @ondblclick="() => OpenAttachmentInSystem(activeLightboxAttachment)" />
                     }
                     else
                     {
-                        <div style="padding: 40px; color: #fff;">Ładowanie podglądu tablicy...</div>
+                        <div style="padding: 40px; color: #fff; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                            <span style="font-size: 1.8rem;">⏳</span>
+                            <span>@(CurrentLang == "en-US" ? "Loading image preview..." : "Ładowanie podglądu zdjęcia...")</span>
+                        </div>
                     }
                 </div>
             </div>
@@ -2759,47 +2801,221 @@
         }
     }
 
-    private async Task OnAttachmentClick(NoteAttachment att)
+    private async Task OnAttachmentClick(NoteAttachment att, string? fallbackSrc = null)
     {
-        var isImg = att.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
-                    att.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
-                    att.FileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
-                    att.FileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            var isImg = att.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase) ||
+                        att.FileName.EndsWith(".jpg", StringComparison.OrdinalIgnoreCase) ||
+                        att.FileName.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                        att.FileName.EndsWith(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+                        att.FileName.EndsWith(".webp", StringComparison.OrdinalIgnoreCase) ||
+                        att.FileName.EndsWith(".heic", StringComparison.OrdinalIgnoreCase);
 
-        if (isImg)
-        {
-            activeLightboxAttachment = att;
-            lightboxImageUri = await NoteService.GetAttachmentDataUriAsync(att.LocalPath, att.ContentType);
-            StateHasChanged();
+            if (isImg)
+            {
+                activeLightboxAttachment = att;
+                lightboxImageUri = "";
+                await InvokeAsync(StateHasChanged);
+
+                string uri = "";
+                if (!string.IsNullOrEmpty(att.LocalPath) && File.Exists(att.LocalPath))
+                {
+                    uri = await NoteService.GetAttachmentDataUriAsync(att.LocalPath, att.ContentType);
+                }
+
+                if (string.IsNullOrEmpty(uri))
+                {
+                    if (!string.IsNullOrEmpty(att.ThumbnailPath) && File.Exists(att.ThumbnailPath))
+                    {
+                        uri = await NoteService.GetAttachmentDataUriAsync(att.ThumbnailPath, "image/jpeg");
+                    }
+                    else if (_thumbnailCache.TryGetValue(att.Id, out var cachedUri) && !string.IsNullOrEmpty(cachedUri))
+                    {
+                        uri = cachedUri;
+                    }
+                    else if (!string.IsNullOrEmpty(fallbackSrc))
+                    {
+                        uri = fallbackSrc;
+                    }
+                }
+
+                // Jeśli plik lokalny z jakiegoś powodu nie istniał, a mamy dane obrazu, przywróć go na dysk
+                if ((string.IsNullOrEmpty(att.LocalPath) || !File.Exists(att.LocalPath)) &&
+                    !string.IsNullOrEmpty(uri) && uri.StartsWith("data:image", StringComparison.OrdinalIgnoreCase))
+                {
+                    try
+                    {
+                        var restoredPath = await SaveDataUriToTempFileAsync(uri, att.FileName);
+                        if (!string.IsNullOrEmpty(restoredPath) && File.Exists(restoredPath))
+                        {
+                            att.LocalPath = restoredPath;
+                        }
+                    }
+                    catch { }
+                }
+
+                lightboxImageUri = uri;
+                await InvokeAsync(StateHasChanged);
+            }
+            else
+            {
+                await OpenAttachmentInSystem(att);
+            }
         }
-        else
+        catch (Exception ex)
         {
-            await OpenAttachmentInSystem(att);
+            Console.WriteLine($"[Notes] OnAttachmentClick error: {ex.Message}");
         }
     }
 
-    private void CloseLightbox()
+    private async Task CloseLightbox()
     {
         activeLightboxAttachment = null;
         lightboxImageUri = "";
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
     }
 
-    private async Task OpenAttachmentInSystem(NoteAttachment att)
+    private static async Task<string> SaveDataUriToTempFileAsync(string dataUri, string? suggestedFileName)
     {
-        if (!string.IsNullOrEmpty(att.LocalPath) && File.Exists(att.LocalPath))
+        if (string.IsNullOrWhiteSpace(dataUri) || !dataUri.StartsWith("data:image", StringComparison.OrdinalIgnoreCase))
         {
+            return "";
+        }
+
+        try
+        {
+            var commaIdx = dataUri.IndexOf(',');
+            if (commaIdx < 0) return "";
+
+            var header = dataUri.Substring(0, commaIdx);
+            var base64 = dataUri.Substring(commaIdx + 1);
+            var bytes = Convert.FromBase64String(base64);
+
+            var ext = ".jpg";
+            if (header.Contains("image/png", StringComparison.OrdinalIgnoreCase)) ext = ".png";
+            else if (header.Contains("image/webp", StringComparison.OrdinalIgnoreCase)) ext = ".webp";
+            else if (header.Contains("image/gif", StringComparison.OrdinalIgnoreCase)) ext = ".gif";
+
+            var fileName = !string.IsNullOrWhiteSpace(suggestedFileName)
+                ? Path.GetFileNameWithoutExtension(suggestedFileName)
+                : $"zdjecie_{DateTime.Now:yyyyMMdd_HHmmss}";
+
+            var attachmentsDir = NoteService.GetAttachmentsDirectory();
+            var targetPath = Path.Combine(attachmentsDir, $"{fileName}_{Guid.NewGuid():N}{ext}");
+
+            await File.WriteAllBytesAsync(targetPath, bytes);
+            return targetPath;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] SaveDataUriToTempFileAsync error: {ex.Message}");
+            return "";
+        }
+    }
+
+    private async Task OpenAttachmentInSystem(NoteAttachment? att)
+    {
+        if (att == null) return;
+
+        try
+        {
+            var filePath = att.LocalPath;
+
+            // Jeśli ścieżka lokalna jest pusta lub plik nie istnieje, sprawdź lightboxImageUri
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            {
+                if (!string.IsNullOrEmpty(lightboxImageUri) && lightboxImageUri.StartsWith("data:image", StringComparison.OrdinalIgnoreCase))
+                {
+                    filePath = await SaveDataUriToTempFileAsync(lightboxImageUri, att.FileName);
+                    if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                    {
+                        att.LocalPath = filePath;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            {
+                Console.WriteLine("[Notes] OpenAttachmentInSystem: Plik załącznika nie istnieje na dysku.");
+                return;
+            }
+
+            var mimeType = !string.IsNullOrEmpty(att.ContentType) ? att.ContentType : "image/jpeg";
+            var fileName = !string.IsNullOrWhiteSpace(att.FileName) ? att.FileName : Path.GetFileName(filePath);
+
+            bool opened = false;
+
+            // Krok 1: Launcher MAUI (OpenFileRequest)
             try
             {
-                await Launcher.Default.OpenAsync(new OpenFileRequest
+                opened = await Launcher.Default.OpenAsync(new OpenFileRequest
                 {
-                    File = new ReadOnlyFile(att.LocalPath)
+                    Title = fileName,
+                    File = new ReadOnlyFile(filePath, mimeType)
                 });
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[Notes] OpenAttachment error: {ex.Message}");
+                Console.WriteLine($"[Notes] Launcher.OpenAsync(OpenFileRequest) failed: {ex.Message}");
             }
+
+            // Krok 2: Launcher MAUI (file:// URI)
+            if (!opened)
+            {
+                try
+                {
+                    opened = await Launcher.Default.OpenAsync(new Uri($"file://{filePath}"));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Notes] Launcher.OpenAsync(Uri) failed: {ex.Message}");
+                }
+            }
+
+#if MACCATALYST
+            // Krok 3: Natywne wywołanie /usr/bin/open na macOS (Podgląd / Preview)
+            if (!opened)
+            {
+                try
+                {
+                    using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "/usr/bin/open",
+                        Arguments = $"\"{filePath}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    });
+                    opened = true;
+                }
+                catch (Exception pEx)
+                {
+                    Console.WriteLine($"[Notes] Process.Start /usr/bin/open failed: {pEx.Message}");
+                }
+            }
+#endif
+
+            // Krok 4: Arkusz udostępniania systemowego (Share Sheet / Photos / Files)
+            if (!opened)
+            {
+                try
+                {
+                    await Share.Default.RequestAsync(new ShareFileRequest
+                    {
+                        Title = fileName,
+                        File = new ShareFile(filePath, mimeType)
+                    });
+                    opened = true;
+                }
+                catch (Exception shareEx)
+                {
+                    Console.WriteLine($"[Notes] Share.RequestAsync failed: {shareEx.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Notes] OpenAttachmentInSystem error: {ex.Message}");
         }
     }
 
@@ -2809,7 +3025,7 @@
         {
             await NoteService.DeleteAttachmentAsync(activeNote.Id, att.Id);
             _thumbnailCache.TryRemove(att.Id, out _);
-            StateHasChanged();
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -3381,25 +3597,56 @@
     }
 
     [JSInvokable]
-    public async Task OnInlineImageClicked(string imageRef)
+    public async Task OnInlineImageClicked(string? attachmentId, string? imageSrc)
     {
-        if (activeNote?.Attachments != null && activeNote.Attachments.Count > 0)
+        try
         {
-            var matchedAtt = activeNote.Attachments.FirstOrDefault(a => a.Id == imageRef);
+            NoteAttachment? matchedAtt = null;
+            if (!string.IsNullOrEmpty(attachmentId) && activeNote?.Attachments != null)
+            {
+                matchedAtt = activeNote.Attachments.FirstOrDefault(a => a.Id == attachmentId);
+            }
+
+            if (matchedAtt == null && activeNote?.Attachments != null && !string.IsNullOrEmpty(imageSrc))
+            {
+                matchedAtt = activeNote.Attachments.FirstOrDefault(a =>
+                    (!string.IsNullOrEmpty(a.LocalPath) && imageSrc.Contains(Path.GetFileName(a.LocalPath), StringComparison.OrdinalIgnoreCase)) ||
+                    (!string.IsNullOrEmpty(a.FileName) && imageSrc.Contains(a.FileName, StringComparison.OrdinalIgnoreCase))
+                );
+            }
+
             if (matchedAtt != null)
             {
-                await OnAttachmentClick(matchedAtt);
+                await OnAttachmentClick(matchedAtt, imageSrc);
                 return;
             }
-        }
 
-        lightboxImageUri = imageRef;
-        activeLightboxAttachment = new NoteAttachment
+            var finalSrc = !string.IsNullOrEmpty(imageSrc) ? imageSrc : attachmentId;
+            if (string.IsNullOrEmpty(finalSrc)) return;
+
+            lightboxImageUri = finalSrc;
+
+            string tempFilePath = "";
+            if (finalSrc.StartsWith("data:image", StringComparison.OrdinalIgnoreCase))
+            {
+                tempFilePath = await SaveDataUriToTempFileAsync(finalSrc, "zdjecie_notatki.jpg");
+            }
+
+            activeLightboxAttachment = new NoteAttachment
+            {
+                Id = attachmentId ?? Guid.NewGuid().ToString("N"),
+                FileName = "Zdjęcie tablicy",
+                ContentType = "image/jpeg",
+                LocalPath = tempFilePath,
+                SizeBytes = !string.IsNullOrEmpty(tempFilePath) && File.Exists(tempFilePath) ? new FileInfo(tempFilePath).Length : 0
+            };
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
         {
-            FileName = "Zdjęcie w tekście",
-            ContentType = "image/jpeg"
-        };
-        StateHasChanged();
+            Console.WriteLine($"[Notes] OnInlineImageClicked error: {ex.Message}");
+        }
     }
 
     // ==============================================================================
