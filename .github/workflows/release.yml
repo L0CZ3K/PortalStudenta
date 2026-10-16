@@ -12,7 +12,7 @@ permissions:
 jobs:
   build-macos:
     name: Build macOS (MacCatalyst)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -25,8 +25,14 @@ jobs:
       - name: Install .NET MAUI Workload
         run: dotnet workload install maui
 
-      - name: Select Xcode 16
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+      - name: Select Newest Xcode
+        run: |
+          NEWEST_XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$NEWEST_XCODE" ]; then
+            echo "Selecting newest Xcode: $NEWEST_XCODE"
+            sudo xcode-select -s "$NEWEST_XCODE/Contents/Developer"
+          fi
+          xcodebuild -version
 
       - name: Publish MacCatalyst
         run: |
@@ -34,12 +40,15 @@ jobs:
             -f net10.0-maccatalyst \
             -c Release \
             -p:CreatePackage=false \
-            -p:ValidateXcodeVersion=false
+            -p:ValidateXcodeVersion=false \
+            -p:MtouchLink=None
 
       - name: Package macOS App into Zip
         run: |
           cd "Portal Studenta/bin/Release/net10.0-maccatalyst/maccatalyst-arm64"
-          zip -r -y "${{ github.workspace }}/UniAvio-macOS.zip" "UniAvio.app"
+          APP_NAME=$(find . -maxdepth 1 -name "*.app" -exec basename {} \;)
+          echo "Packaging application bundle: $APP_NAME"
+          zip -r -y "${{ github.workspace }}/UniAvio-macOS.zip" "$APP_NAME"
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
