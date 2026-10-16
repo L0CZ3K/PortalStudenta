@@ -151,6 +151,10 @@
     "system_announcements": {
       ".read": true,
       ".write": false
+    },
+    "app_config": {
+      ".read": true,
+      ".write": false
     }
   }
 }

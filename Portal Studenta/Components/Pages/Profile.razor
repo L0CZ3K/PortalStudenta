@@ -507,6 +507,19 @@
             </button>
         </div>
     </div>
+
+    <!-- Stopka informacyjna o wersji aplikacji -->
+    <div style="text-align: center; margin-top: 32px; margin-bottom: 24px; color: var(--text-muted); font-size: 0.8rem; display: flex; flex-direction: column; gap: 4px; align-items: center;">
+        <div style="font-weight: 600; letter-spacing: -0.01em; color: var(--text-main); font-size: 0.85rem;">
+            UniAvio • @(CurrentLang == "en-US" ? "Student Portal" : "Portal Studenta")
+        </div>
+        <div>
+            @(CurrentLang == "en-US" ? "Version" : "Wersja") @AppVersionInfo
+        </div>
+        <div style="font-size: 0.74rem; opacity: 0.8;">
+            © @DateTime.Now.Year UniAvio • @(CurrentLang == "en-US" ? "All rights reserved" : "Wszelkie prawa zastrzeżone")
+        </div>
+    </div>
 </div>
 
 @* --- MODAL: ZMIANA UCZELNI --- *@
@@ -674,6 +687,23 @@
     private string CurrentTheme = "Default";
     private string inputGroupCode = "";
     private string CurrentLang = "pl-PL";
+
+    private string AppVersionInfo
+    {
+        get
+        {
+            try
+            {
+                var ver = AppInfo.Current.VersionString;
+                var build = AppInfo.Current.BuildString;
+                return $"{ver} (Build {build})";
+            }
+            catch
+            {
+                return "1.0.0-preview.1 (Build 1)";
+            }
+        }
+    }
 
     // Uczelnie
     private UniversityInfo SelectedUni = new();

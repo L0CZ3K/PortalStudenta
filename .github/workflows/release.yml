@@ -1,0 +1,170 @@
+name: Release - Multiplatform Builds
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS (MacCatalyst)
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install .NET MAUI Workload
+        run: dotnet workload install maui
+
+      - name: Select Xcode 16
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+
+      - name: Publish MacCatalyst
+        run: |
+          dotnet publish "Portal Studenta/Portal Studenta.csproj" \
+            -f net10.0-maccatalyst \
+            -c Release \
+            -p:CreatePackage=false \
+            -p:ValidateXcodeVersion=false
+
+      - name: Package macOS App into Zip
+        run: |
+          cd "Portal Studenta/bin/Release/net10.0-maccatalyst/maccatalyst-arm64"
+          zip -r -y "${{ github.workspace }}/UniAvio-macOS.zip" "UniAvio.app"
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: UniAvio-macOS.zip
+
+  build-android:
+    name: Build Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install .NET MAUI Android Workload
+        run: dotnet workload install maui-android
+
+      - name: Generate Temporary Release Keystore
+        run: |
+          keytool -genkey -v -keystore release.keystore \
+            -alias uniavio -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass uniavio123 -keypass uniavio123 \
+            -dname "CN=UniAvio, OU=Mobile, O=UniAvio, L=Gliwice, ST=Silesia, C=PL"
+
+      - name: Publish Android APK
+        run: |
+          dotnet publish "Portal Studenta/Portal Studenta.csproj" \
+            -f net10.0-android \
+            -c Release \
+            -p:AndroidPackageFormat=apk \
+            -p:AndroidKeyStore=true \
+            -p:AndroidSigningKeyStore=release.keystore \
+            -p:AndroidSigningKeyAlias=uniavio \
+            -p:AndroidSigningKeyPass=uniavio123 \
+            -p:AndroidSigningStorePass=uniavio123
+
+      - name: Locate and Rename Signed APK
+        run: |
+          APK_PATH=$(find "Portal Studenta/bin/Release/net10.0-android" -name "*Signed.apk" | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            APK_PATH=$(find "Portal Studenta/bin/Release/net10.0-android" -name "*.apk" | head -n 1)
+          fi
+          echo "Found APK at: $APK_PATH"
+          cp "$APK_PATH" UniAvio-Android.apk
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: UniAvio-Android.apk
+
+  build-windows:
+    name: Build Windows (WinUI 3)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Install .NET MAUI Windows Workload
+        run: dotnet workload install maui-windows
+
+      - name: Publish Windows App
+        run: |
+          dotnet publish "Portal Studenta/Portal Studenta.csproj" `
+            -f net10.0-windows10.0.19041.0 `
+            -c Release `
+            -p:WindowsPackageType=None
+
+      - name: Package Windows into Zip
+        shell: pwsh
+        run: |
+          $publishFolder = Get-ChildItem -Path "Portal Studenta\bin\Release\net10.0-windows10.0.19041.0" -Recurse -Directory -Filter "publish" | Select-Object -First 1
+          Write-Host "Publish folder found at: $($publishFolder.FullName)"
+          Compress-Archive -Path "$($publishFolder.FullName)\*" -DestinationPath "UniAvio-Windows.zip"
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: UniAvio-Windows.zip
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build-macos, build-android, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS Build
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-build
+
+      - name: Download Android Build
+        uses: actions/download-artifact@v4
+        with:
+          name: android-build
+
+      - name: Download Windows Build
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+
+      - name: Publish Release to GitHub
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            UniAvio-macOS.zip
+            UniAvio-Android.apk
+            UniAvio-Windows.zip
+          draft: false
+          prerelease: true
+          generate_release_notes: true

@@ -71,6 +71,11 @@
             English
         </button>
     </nav>
+
+    <!-- Wskaźnik wersji aplikacji -->
+    <div style="text-align: center; margin-top: 14px; color: var(--text-muted, #86868b); font-size: 0.76rem; opacity: 0.8; font-weight: 500;">
+        UniAvio v@AppVersionInfo
+    </div>
 </div>
 
 <!-- =========================================
@@ -764,6 +769,21 @@
 
     private bool IsEn => currentLang == "en-US";
 
+    private string AppVersionInfo
+    {
+        get
+        {
+            try
+            {
+                return AppInfo.Current.VersionString;
+            }
+            catch
+            {
+                return "1.0.0-preview.1";
+            }
+        }
+    }
+
     private IEnumerable<Portal_Studenta.Services.UniversityInfo> FilteredUniversities
     {
         get
@@ -799,6 +819,19 @@
             }
             StateHasChanged();
         }
+
+        // Asynchroniczna synchronizacja konfiguracji USOS API z Firebase
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await FirebaseService.SyncUsosConfigAsync(currentUni.Code);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Login] Błąd synchronizacji konfiguracji USOS: {ex.Message}");
+            }
+        });
 
         // Asynchroniczny probe dostępności serwerów USOS
         _ = CheckServerHealthAsync(currentUni);
@@ -880,8 +913,19 @@
         isUniModalOpen = false;
         errorMessage = "";
         
-        // Zbadaj stan serwera nowo wybranej uczelni
+        // Zbadaj stan serwera nowo wybranej uczelni i pobierz jej klucze z Firebase
         _ = CheckServerHealthAsync(uni);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await FirebaseService.SyncUsosConfigAsync(uni.Code);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Login] Błąd synchronizacji konfiguracji dla {uni.Code}: {ex.Message}");
+            }
+        });
     }
 
     private void ChangeLanguage(string lang)
@@ -900,6 +944,22 @@
 
         try
         {
+            // Jeśli klucze są puste lub domyślne, pobierz z Firebase przed próbą logowania dla wybranej uczelni
+            if (UsosSecrets.ConsumerKey == "DUMMY_CONSUMER_KEY" || string.IsNullOrWhiteSpace(UsosSecrets.ConsumerKey))
+            {
+                await FirebaseService.SyncUsosConfigAsync(currentUni.Code);
+            }
+
+            if (UsosSecrets.ConsumerKey == "DUMMY_CONSUMER_KEY" || string.IsNullOrWhiteSpace(UsosSecrets.ConsumerKey))
+            {
+                errorMessage = IsEn 
+                    ? $"USOS API credentials not found in Firebase for {currentUni.Code}. Please set app_config/usos/{currentUni.Code.ToLowerInvariant()} in Firebase Console." 
+                    : $"Brak skonfigurowanych kluczy USOS API w Firebase dla {currentUni.Code} (węzeł app_config/usos/{currentUni.Code.ToLowerInvariant()}).";
+                isLoading = false;
+                StateHasChanged();
+                return;
+            }
+
             var (success, error) = await AuthService.AuthenticateAsync();
             
             if (success)

@@ -3,6 +3,7 @@ using Firebase.Database.Query;
 using Portal_Studenta.Models;
 using System.Text.Json;
 using System.Reactive.Linq;
+using Microsoft.Maui.Storage;
 
 namespace Portal_Studenta.Services
 {
@@ -51,6 +52,13 @@ namespace Portal_Studenta.Services
         public string DeletedAt { get; set; } = DateTime.UtcNow.ToString("O");
     }
 
+    public class UsosRemoteConfig
+    {
+        public string ConsumerKey { get; set; } = string.Empty;
+        public string ConsumerSecret { get; set; } = string.Empty;
+        public string OAuthProxyBaseUrl { get; set; } = string.Empty;
+    }
+
     public class FirebaseService : IDisposable, IFirebaseNoteSync
     {
         private readonly FirebaseClient _firebase;
@@ -59,6 +67,88 @@ namespace Portal_Studenta.Services
         public FirebaseService()
         {
             _firebase = new FirebaseClient("https://uniavio-default-rtdb.europe-west1.firebasedatabase.app/");
+        }
+
+        // --- ZDALNA KONFIGURACJA USOS Z FIREBASE ---
+
+        /// <summary>
+        /// Pobiera zdalną konfigurację kluczy USOS API z węzła app_config/usos/{kod_uczelni} (np. polsl, pw) w Firebase Realtime Database.
+        /// Jeśli klucze są dostępne, aktualizuje UsosSecrets w pamięci oraz zapisuje je do lokalnej pamięci podręcznej (Preferences).
+        /// </summary>
+        public async Task<bool> SyncUsosConfigAsync(string? universityCode = null)
+        {
+            var code = !string.IsNullOrWhiteSpace(universityCode) 
+                ? SanitizeKey(universityCode).ToLowerInvariant() 
+                : "polsl";
+
+            // 1. Sprawdź lokalną pamięć podręczną Preferences na wypadek braku sieci
+            try
+            {
+                var cachedKey = Preferences.Default.Get($"cached_usos_key_{code}", string.Empty);
+                var cachedSecret = Preferences.Default.Get($"cached_usos_secret_{code}", string.Empty);
+                var cachedProxy = Preferences.Default.Get($"cached_usos_proxy_{code}", string.Empty);
+
+                if (!string.IsNullOrWhiteSpace(cachedKey) && (UsosSecrets.ConsumerKey == "DUMMY_CONSUMER_KEY" || string.IsNullOrWhiteSpace(UsosSecrets.ConsumerKey)))
+                {
+                    UsosSecrets.ConsumerKey = cachedKey;
+                    if (!string.IsNullOrWhiteSpace(cachedSecret))
+                    {
+                        UsosSecrets.ConsumerSecret = cachedSecret;
+                    }
+                    if (!string.IsNullOrWhiteSpace(cachedProxy))
+                    {
+                        UsosSecrets.OAuthProxyBaseUrl = cachedProxy;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FirebaseService] Błąd odczytu lokalnej pamięci podręcznej USOS ({code}): {ex.Message}");
+            }
+
+            // 2. Pobierz najnowszą konfigurację online z Firebase
+            try
+            {
+                // Najpierw spróbuj z podfolderu uczelni (np. app_config/usos/polsl)
+                var config = await _firebase
+                    .Child("app_config")
+                    .Child("usos")
+                    .Child(code)
+                    .OnceSingleAsync<UsosRemoteConfig>();
+
+                // Fallback: sprawdź bezpośrednio app_config/usos
+                if (config == null || string.IsNullOrWhiteSpace(config.ConsumerKey))
+                {
+                    config = await _firebase
+                        .Child("app_config")
+                        .Child("usos")
+                        .OnceSingleAsync<UsosRemoteConfig>();
+                }
+
+                if (config != null && !string.IsNullOrWhiteSpace(config.ConsumerKey))
+                {
+                    UsosSecrets.ConsumerKey = config.ConsumerKey;
+                    if (!string.IsNullOrWhiteSpace(config.ConsumerSecret))
+                    {
+                        UsosSecrets.ConsumerSecret = config.ConsumerSecret;
+                    }
+                    if (!string.IsNullOrWhiteSpace(config.OAuthProxyBaseUrl))
+                    {
+                        UsosSecrets.OAuthProxyBaseUrl = config.OAuthProxyBaseUrl;
+                    }
+
+                    Preferences.Default.Set($"cached_usos_key_{code}", config.ConsumerKey);
+                    Preferences.Default.Set($"cached_usos_secret_{code}", config.ConsumerSecret ?? string.Empty);
+                    Preferences.Default.Set($"cached_usos_proxy_{code}", config.OAuthProxyBaseUrl ?? string.Empty);
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[FirebaseService] Nie udało się pobrać konfiguracji USOS ({code}) z Firebase: {ex.Message}");
+            }
+
+            return false;
         }
 
         // --- OBSŁUGA CZŁONKOSTWA I SYNCHRONIZACJA MIĘDZY URZĄDZENIAMI ---
