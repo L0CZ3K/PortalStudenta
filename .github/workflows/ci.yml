@@ -34,4 +34,4 @@ jobs:
         run: dotnet test "PortalStudenta.Tests/PortalStudenta.Tests.csproj" --configuration Release --verbosity normal
 
       - name: Build MacCatalyst Target
-        run: dotnet build "Portal Studenta/Portal Studenta.csproj" -f net10.0-maccatalyst -c Release -warnaserror -p:ValidateXcodeVersion=false -p:MtouchLink=Full
+        run: dotnet build "Portal Studenta/Portal Studenta.csproj" -f net10.0-maccatalyst -c Release -warnaserror -p:ValidateXcodeVersion=false -p:MtouchLink=SdkOnly
