@@ -41,7 +41,7 @@ jobs:
             -c Release \
             -p:CreatePackage=false \
             -p:ValidateXcodeVersion=false \
-            -p:MtouchLink=SdkOnly
+            -p:MtouchLink=Full
 
       - name: Package macOS App into Zip
         run: |
