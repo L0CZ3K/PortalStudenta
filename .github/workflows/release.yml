@@ -41,7 +41,7 @@ jobs:
             -c Release \
             -p:CreatePackage=false \
             -p:ValidateXcodeVersion=false \
-            -p:MtouchLink=None
+            -p:MtouchLink=SdkOnly
 
       - name: Package macOS App into Zip
         run: |
@@ -91,7 +91,7 @@ jobs:
             -c Release \
             -p:AndroidPackageFormat=apk \
             -p:AndroidKeyStore=true \
-            -p:AndroidSigningKeyStore=release.keystore \
+            -p:AndroidSigningKeyStore="${{ github.workspace }}/release.keystore" \
             -p:AndroidSigningKeyAlias=uniavio \
             -p:AndroidSigningKeyPass=uniavio123 \
             -p:AndroidSigningStorePass=uniavio123
