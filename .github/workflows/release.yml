@@ -12,7 +12,7 @@ permissions:
 jobs:
   build-macos:
     name: Build macOS (MacCatalyst)
-    runs-on: macos-15
+    runs-on: xcode-27
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
