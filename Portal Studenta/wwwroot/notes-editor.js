@@ -345,6 +345,33 @@ window.notesEditor = {
     },
 
     /**
+     * Sanitizes untrusted HTML by removing executable tags, event handlers, and javascript: URIs.
+     */
+    sanitizeHtml: function (dirtyHtml) {
+        if (!dirtyHtml) return '';
+        try {
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(dirtyHtml, 'text/html');
+            doc.querySelectorAll('script, iframe, object, embed, form, meta, base, link').forEach(function (el) {
+                el.remove();
+            });
+            doc.querySelectorAll('*').forEach(function (el) {
+                const attrs = Array.from(el.attributes || []);
+                for (let i = 0; i < attrs.length; i++) {
+                    const name = attrs[i].name.toLowerCase();
+                    const val = (attrs[i].value || '').trim().toLowerCase();
+                    if (name.startsWith('on') || ((name === 'src' || name === 'href' || name === 'xlink:href') && val.startsWith('javascript:'))) {
+                        el.removeAttribute(attrs[i].name);
+                    }
+                }
+            });
+            return doc.body.innerHTML;
+        } catch (e) {
+            return '';
+        }
+    },
+
+    /**
      * Sets HTML content and re-triggers code syntax formatting.
      */
     setContent: function (editorEl, html, noteId) {
@@ -354,8 +381,9 @@ window.notesEditor = {
         if (noteId !== undefined && noteId !== null) {
             this.currentNoteId = noteId;
         }
-        if (editorEl.innerHTML !== (html || '')) {
-            editorEl.innerHTML = html || '';
+        const safeHtml = this.sanitizeHtml(html || '');
+        if (editorEl.innerHTML !== safeHtml) {
+            editorEl.innerHTML = safeHtml;
             this.highlightAllCodeBlocks();
         }
     },

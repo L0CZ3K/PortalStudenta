@@ -557,6 +557,12 @@ namespace PortalStudenta.Tests
             public Task ShareNoteToGroupLobbyAsync(string groupCode, Note note) => Task.CompletedTask;
             public Task UnshareNoteFromGroupLobbyAsync(string groupCode, Guid noteId) => Task.CompletedTask;
             public Task<HashSet<Guid>> GetGroupDeletedNoteIdsFromCloudAsync(string groupCode) => Task.FromResult(new HashSet<Guid>(GroupDeletedNotes));
+            public Task<long> GetUserNotesLastModifiedTicksAsync(string albumNumber) => Task.FromResult(0L);
+            public Task UploadUserNoteAttachmentAsync(string albumNumber, Guid noteId, CloudNoteAttachmentPayload payload) => Task.CompletedTask;
+            public Task<CloudNoteAttachmentPayload?> DownloadUserNoteAttachmentAsync(string albumNumber, Guid noteId, string attachmentId) => Task.FromResult<CloudNoteAttachmentPayload?>(null);
+            public Task<long> GetGroupNotesLastModifiedTicksAsync(string groupCode) => Task.FromResult(0L);
+            public Task UploadGroupNoteAttachmentAsync(string groupCode, Guid noteId, CloudNoteAttachmentPayload payload) => Task.CompletedTask;
+            public Task<CloudNoteAttachmentPayload?> DownloadGroupNoteAttachmentAsync(string groupCode, Guid noteId, string attachmentId) => Task.FromResult<CloudNoteAttachmentPayload?>(null);
         }
     }
 }

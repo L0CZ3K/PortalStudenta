@@ -31,6 +31,8 @@ namespace Portal_Studenta.Services
         public bool IsStarosta => _role == UserRole.Starosta;
         public bool IsAdmin => _role == UserRole.Admin;
         public bool HasManagementPrivileges => IsStarosta || IsAdmin;
+        public bool CanManageSchedule => HasManagementPrivileges;
+        public string UserName => $"{Preferences.Default.Get("user_first_name", "")} {Preferences.Default.Get("user_last_name", "")}".Trim();
 
         // Kompatybilność wsteczna z dotychczasowym kodem
         public bool IsStarostaMode => IsStarosta;
@@ -49,6 +51,17 @@ namespace Portal_Studenta.Services
                 }
             }
         }
+
+        /// <summary>
+        /// Centralny helper tłumaczeń PL / EN.
+        /// Eliminuje powtarzające się w widokach Razor konstrukcje @(AppState.Language == "en-US" ? "..." : "...").
+        /// </summary>
+        public string T(string pl, string en) => _language == "en-US" ? en : pl;
+
+        /// <summary>
+        /// Identyfikator notatki do automatycznego otwarcia po przejściu z Globalnej Wyszukiwarki (Cmd+K / Ctrl+K).
+        /// </summary>
+        public Guid? PendingOpenNoteId { get; set; }
 
         public string GroupCode
         {

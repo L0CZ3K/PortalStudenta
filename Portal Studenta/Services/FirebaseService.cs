@@ -361,6 +361,14 @@ namespace Portal_Studenta.Services
             try
             {
                 albumNumber = albumNumber.Trim();
+
+                // Szybki odczyt O(1) z bezpośredniego indeksu członkostwa użytkownika
+                var directMembership = await GetUserMembershipAsync(albumNumber);
+                if (directMembership != null && !string.IsNullOrWhiteSpace(directMembership.GroupCode))
+                {
+                    return directMembership;
+                }
+
                 var groups = await _firebase.Child("groups").OnceAsync<FirebaseGroup>();
                 foreach (var g in groups)
                 {
@@ -1037,9 +1045,11 @@ namespace Portal_Studenta.Services
             {
                 var knownEvents = new Dictionary<string, string>();
                 var timer = new System.Timers.Timer(15000);
+                int isChecking = 0;
 
                 async Task CheckForUpdates()
                 {
+                    if (Interlocked.CompareExchange(ref isChecking, 1, 0) != 0) return;
                     try
                     {
                         var events = await GetGroupEventsAsync(sGroup);
@@ -1056,6 +1066,10 @@ namespace Portal_Studenta.Services
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[FirebaseService] Błąd odpytywania zdarzeń grupy ({sGroup}): {ex.Message}");
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref isChecking, 0);
                     }
                 }
 
@@ -1400,9 +1414,11 @@ namespace Portal_Studenta.Services
             {
                 var knownPolls = new Dictionary<string, int>();
                 var timer = new System.Timers.Timer(15000);
+                int isChecking = 0;
 
                 async Task CheckPolls()
                 {
+                    if (Interlocked.CompareExchange(ref isChecking, 1, 0) != 0) return;
                     try
                     {
                         var polls = await GetGroupPollsAsync(sGroup);
@@ -1420,6 +1436,10 @@ namespace Portal_Studenta.Services
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[FirebaseService] Błąd odpytywania ankiet grupy ({sGroup}): {ex.Message}");
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref isChecking, 0);
                     }
                 }
 
@@ -1671,6 +1691,7 @@ namespace Portal_Studenta.Services
                 var sNoteId = SanitizeKey(note.Id.ToString());
                 await _firebase.Child("groups").Child(sGroup).Child("shared_notes").Child(sNoteId).PutAsync(note);
                 await _firebase.Child("groups").Child(sGroup).Child("deleted_notes").Child(sNoteId).DeleteAsync();
+                await _firebase.Child("groups").Child(sGroup).Child("shared_notes_meta").Child("lastModifiedTicks").PutAsync(DateTime.UtcNow.Ticks);
             }
             catch (Exception ex)
             {
@@ -1686,11 +1707,60 @@ namespace Portal_Studenta.Services
                 var sGroup = SanitizeKey(groupCode).ToUpperInvariant();
                 var sNoteId = SanitizeKey(noteId.ToString());
                 await _firebase.Child("groups").Child(sGroup).Child("shared_notes").Child(sNoteId).DeleteAsync();
+                await _firebase.Child("groups").Child(sGroup).Child("shared_note_attachments").Child(sNoteId).DeleteAsync();
                 await _firebase.Child("groups").Child(sGroup).Child("deleted_notes").Child(sNoteId).PutAsync(new FirebaseNoteTombstone());
+                await _firebase.Child("groups").Child(sGroup).Child("shared_notes_meta").Child("lastModifiedTicks").PutAsync(DateTime.UtcNow.Ticks);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[FirebaseService] Błąd usuwania notatki z grupy: {ex.Message}");
+            }
+        }
+
+        public async Task<long> GetGroupNotesLastModifiedTicksAsync(string groupCode)
+        {
+            if (string.IsNullOrWhiteSpace(groupCode)) return 0;
+            try
+            {
+                var sGroup = SanitizeKey(groupCode).ToUpperInvariant();
+                return await _firebase.Child("groups").Child(sGroup).Child("shared_notes_meta").Child("lastModifiedTicks").OnceSingleAsync<long>();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        public async Task UploadGroupNoteAttachmentAsync(string groupCode, Guid noteId, CloudNoteAttachmentPayload payload)
+        {
+            if (string.IsNullOrWhiteSpace(groupCode) || payload == null || string.IsNullOrWhiteSpace(payload.Id)) return;
+            try
+            {
+                var sGroup = SanitizeKey(groupCode).ToUpperInvariant();
+                var sNoteId = SanitizeKey(noteId.ToString());
+                var sAttId = SanitizeKey(payload.Id);
+                await _firebase.Child("groups").Child(sGroup).Child("shared_note_attachments").Child(sNoteId).Child(sAttId).PutAsync(payload);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd wysyłania załącznika notatki grupowej: {ex.Message}");
+            }
+        }
+
+        public async Task<CloudNoteAttachmentPayload?> DownloadGroupNoteAttachmentAsync(string groupCode, Guid noteId, string attachmentId)
+        {
+            if (string.IsNullOrWhiteSpace(groupCode) || string.IsNullOrWhiteSpace(attachmentId)) return null;
+            try
+            {
+                var sGroup = SanitizeKey(groupCode).ToUpperInvariant();
+                var sNoteId = SanitizeKey(noteId.ToString());
+                var sAttId = SanitizeKey(attachmentId);
+                return await _firebase.Child("groups").Child(sGroup).Child("shared_note_attachments").Child(sNoteId).Child(sAttId).OnceSingleAsync<CloudNoteAttachmentPayload>();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd pobierania załącznika notatki grupowej: {ex.Message}");
+                return null;
             }
         }
 
@@ -1754,6 +1824,7 @@ namespace Portal_Studenta.Services
                 var sNoteId = SanitizeKey(note.Id.ToString());
                 await _firebase.Child("users").Child(sAlbum).Child("notes").Child(sNoteId).PutAsync(note);
                 await _firebase.Child("users").Child(sAlbum).Child("deleted_notes").Child(sNoteId).DeleteAsync();
+                await _firebase.Child("users").Child(sAlbum).Child("notes_meta").Child("lastModifiedTicks").PutAsync(DateTime.UtcNow.Ticks);
             }
             catch (Exception ex)
             {
@@ -1769,11 +1840,60 @@ namespace Portal_Studenta.Services
                 var sAlbum = SanitizeKey(albumNumber);
                 var sNoteId = SanitizeKey(noteId.ToString());
                 await _firebase.Child("users").Child(sAlbum).Child("notes").Child(sNoteId).DeleteAsync();
+                await _firebase.Child("users").Child(sAlbum).Child("note_attachments").Child(sNoteId).DeleteAsync();
                 await _firebase.Child("users").Child(sAlbum).Child("deleted_notes").Child(sNoteId).PutAsync(new FirebaseNoteTombstone());
+                await _firebase.Child("users").Child(sAlbum).Child("notes_meta").Child("lastModifiedTicks").PutAsync(DateTime.UtcNow.Ticks);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[FirebaseService] Błąd usuwania notatki z chmury: {ex.Message}");
+            }
+        }
+
+        public async Task<long> GetUserNotesLastModifiedTicksAsync(string albumNumber)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber)) return 0;
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                return await _firebase.Child("users").Child(sAlbum).Child("notes_meta").Child("lastModifiedTicks").OnceSingleAsync<long>();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        public async Task UploadUserNoteAttachmentAsync(string albumNumber, Guid noteId, CloudNoteAttachmentPayload payload)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber) || payload == null || string.IsNullOrWhiteSpace(payload.Id)) return;
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                var sNoteId = SanitizeKey(noteId.ToString());
+                var sAttId = SanitizeKey(payload.Id);
+                await _firebase.Child("users").Child(sAlbum).Child("note_attachments").Child(sNoteId).Child(sAttId).PutAsync(payload);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd wysyłania załącznika notatki użytkownika: {ex.Message}");
+            }
+        }
+
+        public async Task<CloudNoteAttachmentPayload?> DownloadUserNoteAttachmentAsync(string albumNumber, Guid noteId, string attachmentId)
+        {
+            if (string.IsNullOrWhiteSpace(albumNumber) || string.IsNullOrWhiteSpace(attachmentId)) return null;
+            try
+            {
+                var sAlbum = SanitizeKey(albumNumber);
+                var sNoteId = SanitizeKey(noteId.ToString());
+                var sAttId = SanitizeKey(attachmentId);
+                return await _firebase.Child("users").Child(sAlbum).Child("note_attachments").Child(sNoteId).Child(sAttId).OnceSingleAsync<CloudNoteAttachmentPayload>();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FirebaseService] Błąd pobierania załącznika notatki użytkownika: {ex.Message}");
+                return null;
             }
         }
 

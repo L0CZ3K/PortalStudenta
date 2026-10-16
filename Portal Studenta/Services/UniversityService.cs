@@ -14,7 +14,7 @@ namespace Portal_Studenta.Services
     }
 
 
-    public class UniversityService
+    public class UniversityService : IDisposable
     {
         private readonly HttpClient _httpClient;
         private ConnectionHealth _currentHealth = ConnectionHealth.Online;
@@ -50,7 +50,23 @@ namespace Portal_Studenta.Services
                 Connectivity.Current.ConnectivityChanged += OnConnectivityChanged;
                 _ = RefreshHealthAsync();
             }
-            catch {}
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[UniversityService] Init connectivity hook error: {ex.Message}");
+            }
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                Connectivity.Current.ConnectivityChanged -= OnConnectivityChanged;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[UniversityService] Dispose connectivity hook error: {ex.Message}");
+            }
+            _httpClient.Dispose();
         }
 
         private void OnConnectivityChanged(object? sender, ConnectivityChangedEventArgs e)

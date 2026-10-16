@@ -71,7 +71,8 @@ namespace Portal_Studenta.Services
                 }
 #else
                 var htmlPath = Path.ChangeExtension(targetPdfPath, ".html");
-                await File.WriteAllTextAsync(htmlPath, html, Encoding.UTF8);
+                var printableHtml = html.Replace("</body>", "<script>window.onload = function() { setTimeout(function() { window.print(); }, 350); };</script></body>");
+                await File.WriteAllTextAsync(htmlPath, printableHtml, Encoding.UTF8);
                 targetPdfPath = htmlPath;
 #endif
 
@@ -93,6 +94,25 @@ namespace Portal_Studenta.Services
                     {
                         Console.WriteLine($"[PdfExportService] Launcher error: {launchEx.Message}");
                     }
+
+#if WINDOWS
+                    if (!opened)
+                    {
+                        try
+                        {
+                            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = targetPdfPath,
+                                UseShellExecute = true
+                            });
+                            opened = true;
+                        }
+                        catch (Exception winEx)
+                        {
+                            Console.WriteLine($"[PdfExportService] Windows shell error: {winEx.Message}");
+                        }
+                    }
+#endif
 
                     if (!opened)
                     {
@@ -177,11 +197,29 @@ namespace Portal_Studenta.Services
 #endif
 
         /// <summary>
+        /// Strips dangerous tags (<script>, <iframe>, <object>, <embed>) and inline event attributes (on*) from note HTML.
+        /// </summary>
+        private static string SanitizeNoteHtml(string html)
+        {
+            if (string.IsNullOrWhiteSpace(html)) return string.Empty;
+
+            // Remove dangerous block tags with their inner content
+            var cleaned = Regex.Replace(html, @"<\s*(script|iframe|object|embed|form|style|meta|link)\b[^>]*>[\s\S]*?<\s*/\s*\1\s*>", string.Empty, RegexOptions.IgnoreCase);
+            // Remove self-closing or unclosed dangerous tags
+            cleaned = Regex.Replace(cleaned, @"<\s*/?\s*(script|iframe|object|embed|form|meta|link|base)\b[^>]*>", string.Empty, RegexOptions.IgnoreCase);
+            // Remove inline on* event handlers
+            cleaned = Regex.Replace(cleaned, @"\s+on[a-z]+\s*=\s*(""[^""]*""|'[^']*'|[^\s>]+)", string.Empty, RegexOptions.IgnoreCase);
+            // Neutralize javascript: pseudo-protocol in href/src
+            cleaned = Regex.Replace(cleaned, @"(src|href)\s*=\s*([""']?)\s*javascript:[^""'\s>]*\2", "$1=\"\"", RegexOptions.IgnoreCase);
+            return cleaned;
+        }
+
+        /// <summary>
         /// Assembles standalone, CSS-styled HTML with embedded photos and academic headers.
         /// </summary>
         public static async Task<string> GeneratePrintableHtmlAsync(Note note, NoteService? noteService = null)
         {
-            var contentHtml = note.Content ?? string.Empty;
+            var contentHtml = SanitizeNoteHtml(note.Content ?? string.Empty);
 
             // Wstrzyknij lokalne URI obrazów dla tagów z atrybutem data-attachment-id
             if (note.Attachments != null && note.Attachments.Count > 0 && noteService != null)
@@ -198,7 +236,8 @@ namespace Portal_Studenta.Services
                         var dataUri = await NoteService.GetAttachmentDataUriAsync(path, att.ContentType);
                         if (!string.IsNullOrEmpty(dataUri))
                         {
-                            var pattern = $@"<img([^>]*\bdata-attachment-id=[""']{att.Id}[""'][^>]*)>";
+                            var escapedId = Regex.Escape(att.Id);
+                            var pattern = $@"<img([^>]*\bdata-attachment-id=[""']{escapedId}[""'][^>]*)>";
                             contentHtml = Regex.Replace(contentHtml, pattern, m =>
                             {
                                 var tag = m.Value;
@@ -406,6 +445,303 @@ namespace Portal_Studenta.Services
 </html>");
 
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Compiles multiple notes from a subject or folder into a single academic PDF study script ("Skrypt przed sesją")
+        /// with a cover header and Table of Contents.
+        /// </summary>
+        public static async Task<string?> ExportSubjectNotesToPdfAsync(string subjectTitle, System.Collections.Generic.List<Note> notes, NoteService? noteService = null)
+        {
+            if (notes == null || notes.Count == 0) return null;
+
+            try
+            {
+                var safeSubject = string.IsNullOrWhiteSpace(subjectTitle) ? "Skrypt_Akademicki" : subjectTitle;
+                foreach (var invalidChar in Path.GetInvalidFileNameChars())
+                {
+                    safeSubject = safeSubject.Replace(invalidChar, '_');
+                }
+                if (safeSubject.Length > 36) safeSubject = safeSubject.Substring(0, 36);
+
+                var fileName = $"Skrypt_{safeSubject}_{DateTime.Now:yyyyMMdd_HHmm}.pdf";
+#if !TEST_PROJECT
+                var exportDir = Path.Combine(FileSystem.CacheDirectory, "UniAvio_Export");
+#else
+                var exportDir = Path.Combine(Path.GetTempPath(), "UniAvio_Export");
+#endif
+                if (!Directory.Exists(exportDir)) Directory.CreateDirectory(exportDir);
+                var targetPdfPath = Path.Combine(exportDir, fileName);
+
+                var html = await GenerateSubjectCompilationHtmlAsync(subjectTitle, notes, noteService);
+
+#if IOS || MACCATALYST
+                var success = await MainThread.InvokeOnMainThreadAsync(() =>
+                {
+                    return RenderHtmlToPdfOnApple(html, targetPdfPath);
+                });
+
+                if (!success || !File.Exists(targetPdfPath))
+                {
+                    var fallbackHtmlPath = Path.ChangeExtension(targetPdfPath, ".html");
+                    await File.WriteAllTextAsync(fallbackHtmlPath, html, Encoding.UTF8);
+                    targetPdfPath = fallbackHtmlPath;
+                }
+#else
+                var htmlPath = Path.ChangeExtension(targetPdfPath, ".html");
+                var printableHtml = html.Replace("</body>", "<script>window.onload = function() { setTimeout(function() { window.print(); }, 350); };</script></body>");
+                await File.WriteAllTextAsync(htmlPath, printableHtml, Encoding.UTF8);
+                targetPdfPath = htmlPath;
+#endif
+
+#if !TEST_PROJECT
+                if (File.Exists(targetPdfPath))
+                {
+                    var isPdf = targetPdfPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
+                    var mimeType = isPdf ? "application/pdf" : "text/html";
+                    bool opened = false;
+                    try
+                    {
+                        opened = await Launcher.Default.OpenAsync(new OpenFileRequest
+                        {
+                            Title = Path.GetFileName(targetPdfPath),
+                            File = new ReadOnlyFile(targetPdfPath, mimeType)
+                        });
+                    }
+                    catch { }
+
+#if WINDOWS
+                    if (!opened)
+                    {
+                        try
+                        {
+                            using var proc = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = targetPdfPath,
+                                UseShellExecute = true
+                            });
+                            opened = true;
+                        }
+                        catch { }
+                    }
+#endif
+
+                    if (!opened)
+                    {
+                        try
+                        {
+                            await Share.Default.RequestAsync(new ShareFileRequest
+                            {
+                                Title = Path.GetFileName(targetPdfPath),
+                                File = new ShareFile(targetPdfPath, mimeType)
+                            });
+                        }
+                        catch { }
+                    }
+                    return targetPdfPath;
+                }
+#else
+                return targetPdfPath;
+#endif
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PdfExportService] ExportSubjectNotesToPdfAsync error: {ex.Message}");
+            }
+
+            return null;
+        }
+
+        public static async Task<string> GenerateSubjectCompilationHtmlAsync(string subjectTitle, System.Collections.Generic.List<Note> notes, NoteService? noteService = null)
+        {
+            var safeTitle = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(subjectTitle) ? "Skrypt Akademicki" : subjectTitle);
+            var generatedDate = DateTime.Now.ToString("dd.MM.yyyy, HH:mm");
+
+            var tocBuilder = new StringBuilder();
+            var chaptersBuilder = new StringBuilder();
+
+            for (int i = 0; i < notes.Count; i++)
+            {
+                var note = notes[i];
+                var idx = i + 1;
+                var noteTitle = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(note.Title) ? $"Notatka #{idx}" : note.Title);
+                var noteType = !string.IsNullOrWhiteSpace(note.LessonType) ? $"[{WebUtility.HtmlEncode(note.LessonType)}] " : "";
+                var noteDate = note.UpdatedAt.ToString("dd.MM.yyyy");
+
+                tocBuilder.Append($@"
+                <div class=""toc-row"">
+                    <span class=""toc-num"">{idx}.</span>
+                    <span class=""toc-title"">{noteType}{noteTitle}</span>
+                    <span class=""toc-meta"">{WebUtility.HtmlEncode(note.Author)} • {noteDate}</span>
+                </div>");
+
+                var contentHtml = SanitizeNoteHtml(note.Content ?? string.Empty);
+                if (note.Attachments != null && note.Attachments.Count > 0 && noteService != null)
+                {
+                    foreach (var att in note.Attachments)
+                    {
+                        if (string.IsNullOrEmpty(att.Id)) continue;
+                        var path = !string.IsNullOrEmpty(att.LocalPath) && File.Exists(att.LocalPath)
+                            ? att.LocalPath
+                            : att.ThumbnailPath;
+
+                        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+                        {
+                            var dataUri = await NoteService.GetAttachmentDataUriAsync(path, att.ContentType);
+                            if (!string.IsNullOrEmpty(dataUri))
+                            {
+                                var escapedId = Regex.Escape(att.Id);
+                                var pattern = $@"<img([^>]*\bdata-attachment-id=[""']{escapedId}[""'][^>]*)>";
+                                contentHtml = Regex.Replace(contentHtml, pattern, m =>
+                                {
+                                    var tag = m.Value;
+                                    if (!tag.Contains("src=", StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        return tag.Insert(4, $" src=\"{dataUri}\"");
+                                    }
+                                    return Regex.Replace(tag, @"src=""[^""]*""", $"src=\"{dataUri}\"");
+                                }, RegexOptions.IgnoreCase);
+                            }
+                        }
+                    }
+                }
+
+                chaptersBuilder.Append($@"
+                <div class=""chapter"">
+                    <div class=""chapter-header"">
+                        <div class=""chapter-kicker"">Rozdział {idx} z {notes.Count} • {noteDate} • Autor: {WebUtility.HtmlEncode(note.Author)}</div>
+                        <h2 class=""chapter-title"">{noteType}{noteTitle}</h2>
+                    </div>
+                    <div class=""note-content"">
+                        {contentHtml}
+                    </div>
+                </div>");
+            }
+
+            return $@"<!DOCTYPE html>
+<html lang=""pl"">
+<head>
+    <meta charset=""utf-8"" />
+    <title>Skrypt — {safeTitle}</title>
+    <style>
+        @page {{ size: A4; margin: 18mm 16mm 18mm 16mm; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: #111827;
+            background-color: #ffffff;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+        }}
+        .cover {{
+            border-bottom: 3px solid #2563eb;
+            padding-bottom: 18px;
+            margin-bottom: 24px;
+        }}
+        .cover-kicker {{
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #2563eb;
+        }}
+        .cover-title {{
+            font-size: 28px;
+            font-weight: 800;
+            margin: 6px 0 8px 0;
+            color: #0f172a;
+        }}
+        .cover-sub {{
+            font-size: 13px;
+            color: #64748b;
+        }}
+        .toc-box {{
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 16px 20px;
+            margin-bottom: 28px;
+        }}
+        .toc-heading {{
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #334155;
+            margin: 0 0 10px 0;
+        }}
+        .toc-row {{
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            padding: 5px 0;
+            border-bottom: 1px dashed #e2e8f0;
+            font-size: 13px;
+        }}
+        .toc-row:last-child {{ border-bottom: none; }}
+        .toc-num {{ font-weight: 700; color: #2563eb; min-width: 22px; }}
+        .toc-title {{ font-weight: 600; color: #0f172a; flex: 1; }}
+        .toc-meta {{ font-size: 11px; color: #64748b; }}
+        .chapter {{
+            margin-bottom: 32px;
+            padding-bottom: 22px;
+            border-bottom: 2px solid #f1f5f9;
+        }}
+        .chapter-header {{
+            background: #eff6ff;
+            border-left: 4px solid #2563eb;
+            padding: 10px 14px;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 14px;
+        }}
+        .chapter-kicker {{
+            font-size: 11px;
+            font-weight: 600;
+            color: #1d4ed8;
+            margin-bottom: 2px;
+        }}
+        .chapter-title {{
+            font-size: 19px;
+            font-weight: 800;
+            margin: 0;
+            color: #0f172a;
+        }}
+        .note-content {{ font-size: 14px; color: #1f2937; }}
+        .note-inline-image {{
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            margin: 10px 0;
+            border: 1px solid #e2e8f0;
+            display: block;
+            page-break-inside: avoid;
+        }}
+        .notes-code-card {{
+            background: #0f172a;
+            color: #f8fafc;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 14px 0;
+            font-family: ui-monospace, Menlo, Monaco, monospace;
+            font-size: 12px;
+            page-break-inside: avoid;
+        }}
+        .code-header-actions, .code-lang-select {{ display: none !important; }}
+    </style>
+</head>
+<body>
+    <div class=""cover"">
+        <div class=""cover-kicker"">Skrypt Przed Sesją • Portal Studenta UniAvio</div>
+        <h1 class=""cover-title"">📚 {safeTitle}</h1>
+        <div class=""cover-sub"">Zestawienie {notes.Count} notatek akademickich • Wygenerowano: {generatedDate}</div>
+    </div>
+    <div class=""toc-box"">
+        <div class=""toc-heading"">Spis treści skryptu</div>
+        {tocBuilder}
+    </div>
+    {chaptersBuilder}
+</body>
+</html>";
         }
     }
 }

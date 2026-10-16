@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="Portal Studenta.styles.css" />
 
     <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="css/notes.css" />
 </head>
 <body>
     <div id="app">Ładowanie...</div>
@@ -42,6 +43,19 @@
         var avail = Math.max(260, vh - overhead);
         var perH = Math.floor(avail / Math.max(1, totalHours));
         return Math.max(34, Math.min(65, perH));
+    };
+
+    window.registerGlobalSearchShortcut = function (dotNetRef) {
+        if (window._globalSearchHandler) {
+            window.removeEventListener('keydown', window._globalSearchHandler);
+        }
+        window._globalSearchHandler = function (e) {
+            if ((e.metaKey || e.ctrlKey) && e.key && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                dotNetRef.invokeMethodAsync('ToggleGlobalSearchFromJs');
+            }
+        };
+        window.addEventListener('keydown', window._globalSearchHandler);
     };
 </script>
 </html>

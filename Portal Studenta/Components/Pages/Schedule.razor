@@ -1893,7 +1893,17 @@
         }
 
         _timer = new System.Timers.Timer(60000);
-        _timer.Elapsed += (s, e) => InvokeAsync(StateHasChanged);
+        _timer.Elapsed += async (s, e) =>
+        {
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Schedule] Timer error: {ex.Message}");
+            }
+        };
         _timer.Start();
 
         await LoadWeekDataAsync();
@@ -2040,7 +2050,7 @@
 
     private void RecalculateWeekMetrics()
     {
-        var allData = ScheduleService.GetPreparedData(IsGodMode).Concat(ScheduleService.CustomEvents).ToList();
+        var allData = ScheduleService.GetAllEvents(IsGodMode);
         LessonsInWeek = allData.Where(l => 
         {
             var effStart = ShowModified ? l.Start : (l.OriginalStart != default ? l.OriginalStart : l.Start);
@@ -2514,13 +2524,18 @@
 
     public void Dispose()
     {
+        _timer?.Stop();
         _timer?.Dispose();
+        _timer = null;
         AppState.OnChange -= OnAppStateChanged;
         ScheduleService.OnScheduleLoaded -= OnScheduleDataChanged;
         try
         {
             Connectivity.Current.ConnectivityChanged -= OnConnectivityChanged;
         }
-        catch { }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Schedule] Connectivity unsubscribe error: {ex.Message}");
+        }
     }
 }

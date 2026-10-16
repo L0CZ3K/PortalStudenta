@@ -45,7 +45,7 @@
             {
                 @foreach (var item in News)
                 {
-                    var isSys = item.IsSystem || item.Author.ToLower() == "dev" || item.Author.ToLower() == "system";
+                    var isSys = item.IsSystem || string.Equals(item.Author, "dev", StringComparison.OrdinalIgnoreCase) || string.Equals(item.Author, "system", StringComparison.OrdinalIgnoreCase);
                     var leftBorderColor = isSys ? "#BF5AF2" : (item.IsPriority ? "var(--danger-color)" : "var(--color-starosta)");
                     var emoji = isSys ? "🛠️" : (item.IsPriority ? "🚨" : "📣");
 
@@ -296,7 +296,7 @@
     {
         if (SelectedAnnouncement != null)
         {
-            bool isProtected = SelectedAnnouncement.IsSystem || SelectedAnnouncement.Author.ToLower() == "dev" || SelectedAnnouncement.Author.ToLower() == "system";
+            bool isProtected = SelectedAnnouncement.IsSystem || string.Equals(SelectedAnnouncement.Author, "dev", StringComparison.OrdinalIgnoreCase) || string.Equals(SelectedAnnouncement.Author, "system", StringComparison.OrdinalIgnoreCase);
             if (AppState.HasManagementPrivileges && !isProtected)
             {
                 await AnnouncementService.DeleteAnnouncementAsync(SelectedAnnouncement);

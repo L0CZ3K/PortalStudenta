@@ -15,6 +15,17 @@ namespace Portal_Studenta.Models
         public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
     }
 
+    public class CloudNoteAttachmentPayload
+    {
+        public string Id { get; set; } = "";
+        public string NoteId { get; set; } = "";
+        public string FileName { get; set; } = "";
+        public string ContentType { get; set; } = "image/jpeg";
+        public long SizeBytes { get; set; }
+        public string Base64Data { get; set; } = "";
+        public DateTime UploadedAt { get; set; } = DateTime.UtcNow;
+    }
+
     public enum NoteFolderType
     {
         All,
@@ -23,6 +34,7 @@ namespace Portal_Studenta.Models
         BetweenDevices,
         Shared,
         Uncategorized,
+        Trash,
         Subject,
         LessonType,
         Group

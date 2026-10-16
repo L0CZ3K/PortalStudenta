@@ -344,14 +344,14 @@ namespace Portal_Studenta.Services
                     finalPhotoBytes = bodyBytes;
                 }
 
-                // Bezpieczeństwo w sieci lokalnej: weryfikacja tokena parowania urządzeń (jeśli podano)
-                if (!string.IsNullOrEmpty(clientToken) && !string.IsNullOrEmpty(AuthToken) && !string.Equals(AuthToken, clientToken, StringComparison.Ordinal))
+                // Bezpieczeństwo w sieci lokalnej: bezwzględna weryfikacja tokena parowania urządzeń (jeśli skonfigurowano AuthToken)
+                if (!string.IsNullOrEmpty(AuthToken) && !string.Equals(AuthToken, clientToken, StringComparison.Ordinal))
                 {
-                    Console.WriteLine("[LocalNetworkCameraServer] Odrzucono nieautoryzowane żądanie Wi-Fi (niepoprawny token).");
+                    Console.WriteLine("[LocalNetworkCameraServer] Odrzucono nieautoryzowane żądanie Wi-Fi (brak lub niepoprawny token).");
                     var unauthResp = "HTTP/1.1 401 Unauthorized\r\n" +
                                      "Content-Type: application/json\r\n" +
                                      "Connection: close\r\n\r\n" +
-                                     "{\"error\":\"Invalid session token\"}";
+                                     "{\"error\":\"Invalid or missing session token\"}";
                     await stream.WriteAsync(Encoding.UTF8.GetBytes(unauthResp).AsMemory(), ct);
                     return;
                 }
@@ -375,6 +375,22 @@ namespace Portal_Studenta.Services
             }
         }
 
+        private static readonly HttpClient SharedUploadClient = new(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+        })
+        {
+            Timeout = TimeSpan.FromMilliseconds(5000)
+        };
+
+        private static readonly HttpClient SharedPingClient = new(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(2)
+        })
+        {
+            Timeout = TimeSpan.FromMilliseconds(700)
+        };
+
         /// <summary>
         /// Wysyła zdjęcie z telefonu bezpośrednio do serwera na komputerze przez sieć Wi-Fi.
         /// </summary>
@@ -387,12 +403,6 @@ namespace Portal_Studenta.Services
 
             try
             {
-                using var httpClient = new HttpClient { Timeout = TimeSpan.FromMilliseconds(5000) };
-                if (!string.IsNullOrEmpty(authToken))
-                {
-                    httpClient.DefaultRequestHeaders.Add("X-Auth-Token", authToken);
-                }
-
                 var payload = JsonSerializer.Serialize(new
                 {
                     base64 = base64Photo,
@@ -400,9 +410,17 @@ namespace Portal_Studenta.Services
                     token = authToken
                 });
 
-                using var content = new StringContent(payload, Encoding.UTF8, "application/json");
                 var url = endpointUrl.TrimEnd('/') + "/api/upload_whiteboard";
-                var response = await httpClient.PostAsync(url, content);
+                using var request = new HttpRequestMessage(HttpMethod.Post, url)
+                {
+                    Content = new StringContent(payload, Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrEmpty(authToken))
+                {
+                    request.Headers.TryAddWithoutValidation("X-Auth-Token", authToken);
+                }
+
+                using var response = await SharedUploadClient.SendAsync(request);
                 return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
@@ -420,9 +438,8 @@ namespace Portal_Studenta.Services
             if (string.IsNullOrWhiteSpace(endpointUrl)) return (false, false);
             try
             {
-                using var httpClient = new HttpClient { Timeout = TimeSpan.FromMilliseconds(700) };
                 var url = endpointUrl.TrimEnd('/') + "/api/ping";
-                var response = await httpClient.GetAsync(url);
+                using var response = await SharedPingClient.GetAsync(url);
                 if (!response.IsSuccessStatusCode) return (false, false);
 
                 var json = await response.Content.ReadAsStringAsync();

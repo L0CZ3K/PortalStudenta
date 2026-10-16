@@ -665,7 +665,10 @@
                 }
                 StateHasChanged();
             }
-            catch {}
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Home] Timer refresh error: {ex.Message}");
+            }
         });
         _timer.Start();
 
@@ -692,7 +695,11 @@
     {
         if (!ProfileService.IsLoaded)
         {
-            _ = Task.Run(async () => { try { await ProfileService.LoadProfileAsync(); } catch {} });
+            _ = Task.Run(async () =>
+            {
+                try { await ProfileService.LoadProfileAsync(); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Home] LoadProfileAsync error: {ex.Message}"); }
+            });
         }
 
         int diff = (7 + (DateTime.Today.DayOfWeek - DayOfWeek.Monday)) % 7;
@@ -734,7 +741,10 @@
                 {
                     await ScheduleService.SyncCloudEventsAsync();
                 }
-                catch {}
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[Home] SyncCloudEventsAsync error: {ex.Message}");
+                }
             });
 
             // Jeśli minęła ponad godzina od ostatniego pobrania, odświeżamy w tle
@@ -837,7 +847,7 @@
     {
         if (l.IsHighPriority) return "color-danger";
         
-        var type = l.Type.ToUpper();
+        var type = (l.Type ?? "").ToUpperInvariant();
         if (type == "WYK") return "color-wyklad";
         if (type == "CW") return "color-cwiczenia";
         if (type == "LAB") return "color-lab";
@@ -850,7 +860,7 @@
     private string GetAccentClass(Lesson l)
     {
         if (l.IsHighPriority) return "accent-danger";
-        var type = l.Type.ToUpper();
+        var type = (l.Type ?? "").ToUpperInvariant();
         if (type == "WYK") return "accent-wyklad";
         if (type == "CW") return "accent-cw";
         if (type == "LAB") return "accent-lab";
@@ -861,7 +871,7 @@
 
     private string GetTypePillClass(Lesson l)
     {
-        var type = l.Type.ToUpper();
+        var type = (l.Type ?? "").ToUpperInvariant();
         if (type == "WYK") return "type-pill wyklad";
         if (type == "CW") return "type-pill cw";
         if (type == "LAB") return "type-pill lab";
@@ -893,7 +903,16 @@
         IsLessonModalOpen = false; 
         IsMoveModalOpen = true; 
     }
-    private void OpenRoomModal() { newRoom = SelectedLesson!.Place; IsLessonModalOpen = false; IsRoomModalOpen = true; }
+
+    private void OpenRoomModal()
+    {
+        if (SelectedLesson != null)
+        {
+            newRoom = SelectedLesson.Place ?? "";
+        }
+        IsLessonModalOpen = false;
+        IsRoomModalOpen = true;
+    }
 
     private void CloseModals()
     {
@@ -949,12 +968,20 @@
         }
     }
 
-    private void DeleteAnnouncement()
+    private async Task DeleteAnnouncement()
     {
         if (SelectedAnnouncement != null)
         {
+            bool isProtected = SelectedAnnouncement.IsSystem ||
+                               string.Equals(SelectedAnnouncement.Author, "dev", StringComparison.OrdinalIgnoreCase) ||
+                               string.Equals(SelectedAnnouncement.Author, "system", StringComparison.OrdinalIgnoreCase);
+            if (AppState.HasManagementPrivileges && !isProtected)
+            {
+                await AnnouncementService.DeleteAnnouncementAsync(SelectedAnnouncement);
+                Layout?.ShowToast(CurrentLang == "en-US" ? "Announcement deleted." : "Ogłoszenie zostało usunięte.", MainLayout.ToastType.Warning);
+            }
             CloseModals();
-            _ = LoadDataAsync();
+            await LoadDataAsync();
         }
     }
 

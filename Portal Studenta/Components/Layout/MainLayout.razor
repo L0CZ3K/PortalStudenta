@@ -7,6 +7,7 @@
 @inject Portal_Studenta.Services.ScheduleService ScheduleService
 @inject Portal_Studenta.Services.NotificationService NotificationService
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @implements IDisposable
 
 <div class="app-shell">
@@ -27,6 +28,16 @@
                     <button class="status-refresh-btn @(isCheckingStatus ? "spinning" : "")" @onclick="RefreshServerStatus" title="Odśwież status serwera">🔄</button>
                 </span>
             </div>
+        </div>
+
+        <div style="padding: 0 12px 10px;">
+            <button type="button" class="sidebar-item" style="width: 100%; justify-content: space-between; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);" @onclick="OpenGlobalSearch">
+                <span style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 0.95rem;">🔍</span>
+                    <span class="sidebar-label">@AppState.T("Szukaj...", "Search...")</span>
+                </span>
+                <span style="font-size: 0.68rem; opacity: 0.6; border: 1px solid rgba(255,255,255,0.18); border-radius: 5px; padding: 1px 5px;">⌘K</span>
+            </button>
         </div>
 
         <nav class="sidebar-nav">
@@ -110,6 +121,7 @@
                 <span class="mobile-topbar-title">UniAvio</span>
             </div>
             <div class="mobile-topbar-right" style="display: flex; align-items: center; gap: 6px;">
+                <button class="status-refresh-btn" @onclick="OpenGlobalSearch" title="@AppState.T("Szukaj (⌘K)", "Search (⌘K)")">🔍</button>
                 <span class="mobile-uni-chip" @onclick="HandleUniChipClick" style="cursor: pointer;" title="@UniversityService.StatusMessage">
                     <span class="uni-chip-dot" style="background-color: @UniversityService.DotColor; box-shadow: 0 0 6px @UniversityService.DotColor;"></span>
                     <span>@UniversityService.StatusLabel</span>
@@ -199,6 +211,8 @@
     </div>
 </div>
 
+<GlobalSearchModal @bind-IsOpen="showGlobalSearch" />
+
 <!-- ==============================================
      TOAST NOTIFICATIONS SYSTEM
      ============================================== -->
@@ -215,6 +229,36 @@
 @code {
     private List<ToastMessage> ActiveToasts = new();
     private string CurrentLang = "pl-PL";
+    private bool showGlobalSearch = false;
+    private DotNetObjectReference<MainLayout>? _layoutDotNetRef;
+
+    private void OpenGlobalSearch()
+    {
+        showGlobalSearch = true;
+    }
+
+    [JSInvokable]
+    public Task ToggleGlobalSearchFromJs()
+    {
+        showGlobalSearch = !showGlobalSearch;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _layoutDotNetRef = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("registerGlobalSearchShortcut", _layoutDotNetRef);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MainLayout] GlobalSearch shortcut registration error: {ex.Message}");
+            }
+        }
+    }
 
     public enum ToastType { Success, Info, Warning, Error }
 
@@ -450,6 +494,7 @@
         ProfileService.OnProfileLoaded -= OnProfileLoaded;
         UsosAuthService.OnSessionExpired -= HandleSessionExpired;
         _userSessionInitLock.Dispose();
+        _layoutDotNetRef?.Dispose();
     }
 
     private void HandleSessionExpired()

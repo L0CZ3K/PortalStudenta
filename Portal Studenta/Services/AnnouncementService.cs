@@ -66,7 +66,10 @@ namespace Portal_Studenta.Services
                 }
                 Microsoft.Maui.Storage.Preferences.Default.Set("known_announcements", string.Join(";", knownIds.TakeLast(60)));
             }
-            catch { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AnnouncementService] Notification check error: {ex.Message}");
+            }
 
             return AnnouncementLogic.FilterAndSort(allNews, DateTime.Now);
         }

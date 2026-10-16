@@ -955,7 +955,10 @@
                 IsPriority = true
             });
         }
-        catch {}
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Profile] Announcement on Starosta transfer error: {ex.Message}");
+        }
 
         AppState.SetUserRole(UserRole.Student);
         if (!string.IsNullOrEmpty(myId))
@@ -987,16 +990,26 @@
         IsLeaveModalOpen = true;
         LeaveCountdown = 5;
         CanLeaveNow = false;
-        
+
+        _leaveTimer?.Stop();
+        _leaveTimer?.Dispose();
         _leaveTimer = new System.Timers.Timer(1000);
-        _leaveTimer.Elapsed += (s, e) => {
-            LeaveCountdown--;
-            if (LeaveCountdown <= 0)
+        _leaveTimer.Elapsed += async (s, e) =>
+        {
+            try
             {
-                CanLeaveNow = true;
-                _leaveTimer.Stop();
+                LeaveCountdown--;
+                if (LeaveCountdown <= 0)
+                {
+                    CanLeaveNow = true;
+                    _leaveTimer?.Stop();
+                }
+                await InvokeAsync(StateHasChanged);
             }
-            InvokeAsync(StateHasChanged);
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Profile] LeaveTimer error: {ex.Message}");
+            }
         };
         _leaveTimer.Start();
     }
@@ -1005,6 +1018,8 @@
     {
         IsLeaveModalOpen = false;
         _leaveTimer?.Stop();
+        _leaveTimer?.Dispose();
+        _leaveTimer = null;
     }
 
     private async Task ConfirmLeave()
@@ -1210,6 +1225,8 @@
     public void Dispose()
     {
         AppState.OnChange -= OnAppStateChanged;
+        _leaveTimer?.Stop();
         _leaveTimer?.Dispose();
+        _leaveTimer = null;
     }
 }

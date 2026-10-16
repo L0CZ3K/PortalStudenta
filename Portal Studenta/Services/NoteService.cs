@@ -16,10 +16,17 @@ namespace Portal_Studenta.Services
         Task SyncNoteToCloudAsync(string albumNumber, Note note);
         Task DeleteNoteFromCloudAsync(string albumNumber, Guid noteId);
         Task<HashSet<Guid>> GetDeletedNoteIdsFromCloudAsync(string albumNumber);
+        Task<long> GetUserNotesLastModifiedTicksAsync(string albumNumber);
+        Task UploadUserNoteAttachmentAsync(string albumNumber, Guid noteId, CloudNoteAttachmentPayload payload);
+        Task<CloudNoteAttachmentPayload?> DownloadUserNoteAttachmentAsync(string albumNumber, Guid noteId, string attachmentId);
+
         Task<List<Note>> GetGroupSharedNotesAsync(string groupCode);
         Task ShareNoteToGroupLobbyAsync(string groupCode, Note note);
         Task UnshareNoteFromGroupLobbyAsync(string groupCode, Guid noteId);
         Task<HashSet<Guid>> GetGroupDeletedNoteIdsFromCloudAsync(string groupCode);
+        Task<long> GetGroupNotesLastModifiedTicksAsync(string groupCode);
+        Task UploadGroupNoteAttachmentAsync(string groupCode, Guid noteId, CloudNoteAttachmentPayload payload);
+        Task<CloudNoteAttachmentPayload?> DownloadGroupNoteAttachmentAsync(string groupCode, Guid noteId, string attachmentId);
     }
 
     [Table("DeletedNoteTombstones")]
@@ -40,9 +47,13 @@ namespace Portal_Studenta.Services
         private readonly SemaphoreSlim _dbLock = new(1, 1);
         private readonly SemaphoreSlim _syncLock = new(1, 1);
         private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, DateTime> _locallyDeletedNoteIds = new();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _uploadedCloudAttachmentKeys = new();
         private readonly List<Note> _notes = new();
         private SQLiteAsyncConnection? _db;
         private bool _isInitialized;
+        private long _lastSyncedUserCloudTicks;
+        private long _lastSyncedGroupCloudTicks;
+        private volatile bool _hasPendingLocalSyncChanges = true;
 
         /// <summary>
         /// Event fired whenever notes collection is modified (created, edited, deleted, pinned).
@@ -86,11 +97,13 @@ namespace Portal_Studenta.Services
 
         /// <summary>
         /// Ensures SQLite database connection is established and the Note table exists.
+        /// Automatically purges soft-deleted notes in Trash older than 7 days.
         /// </summary>
         public async Task EnsureInitializedAsync()
         {
             if (_isInitialized) return;
 
+            var expiredIds = new List<Guid>();
             await _dbLock.WaitAsync();
             try
             {
@@ -111,6 +124,7 @@ namespace Portal_Studenta.Services
                     }
                 }
 
+                var trashCutoff = DateTime.UtcNow.AddDays(-7);
                 var persisted = await _db.Table<Note>().ToListAsync();
                 lock (_notes)
                 {
@@ -118,9 +132,17 @@ namespace Portal_Studenta.Services
                     var existingIds = _notes.Select(n => n.Id).ToHashSet();
                     foreach (var note in persisted)
                     {
-                        // Nie przywracaj notatek, które zostały usunięte
+                        // Nie przywracaj notatek, które zostały trwale usunięte
                         if (_locallyDeletedNoteIds.ContainsKey(note.Id))
                         {
+                            continue;
+                        }
+
+                        // Automatyczne czyszczenie kosza po 7 dniach
+                        if (note.IsDeleted && note.DeletedAt.HasValue && note.DeletedAt.Value.ToUniversalTime() < trashCutoff)
+                        {
+                            expiredIds.Add(note.Id);
+                            DeleteAttachmentFiles(note);
                             continue;
                         }
 
@@ -129,6 +151,17 @@ namespace Portal_Studenta.Services
                             _notes.Add(note);
                         }
                     }
+                }
+
+                foreach (var expId in expiredIds)
+                {
+                    try
+                    {
+                        await _db.DeleteAsync<Note>(expId);
+                        await _db.InsertOrReplaceAsync(new DeletedNoteTombstone { NoteId = expId, DeletedAt = DateTime.UtcNow });
+                        _locallyDeletedNoteIds[expId] = DateTime.UtcNow;
+                    }
+                    catch { }
                 }
 
                 _isInitialized = true;
@@ -181,15 +214,37 @@ namespace Portal_Studenta.Services
         // =======================================================
 
         /// <summary>
-        /// Returns all notes ordered with pinned notes first, then descending by last update timestamp.
+        /// Returns all active (non-deleted) notes ordered with pinned notes first, then descending by last update timestamp.
         /// </summary>
         public List<Note> GetAllNotes()
         {
             lock (_notes)
             {
-                return _notes.OrderByDescending(n => n.IsPinned)
+                return _notes.Where(n => !n.IsDeleted)
+                             .OrderByDescending(n => n.IsPinned)
                              .ThenByDescending(n => n.UpdatedAt)
                              .ToList();
+            }
+        }
+
+        /// <summary>
+        /// Returns all soft-deleted notes currently in the Trash folder (kept for 7 days).
+        /// </summary>
+        public List<Note> GetTrashedNotes()
+        {
+            lock (_notes)
+            {
+                return _notes.Where(n => n.IsDeleted)
+                             .OrderByDescending(n => n.DeletedAt ?? n.UpdatedAt)
+                             .ToList();
+            }
+        }
+
+        private List<Note> GetAllNotesIncludingTrash()
+        {
+            lock (_notes)
+            {
+                return _notes.ToList();
             }
         }
 
@@ -204,6 +259,7 @@ namespace Portal_Studenta.Services
             lock (_notes)
             {
                 return _notes.Where(n =>
+                    !n.IsDeleted &&
                     string.Equals(n.Subject, subject, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(n.LessonType, type, StringComparison.OrdinalIgnoreCase) &&
                     n.LessonDate.Date == date.Date)
@@ -219,6 +275,7 @@ namespace Portal_Studenta.Services
         {
             if (note == null) throw new ArgumentNullException(nameof(note), "Note cannot be null.");
             _locallyDeletedNoteIds.TryRemove(note.Id, out _);
+            _hasPendingLocalSyncChanges = true;
             note.Content = StripHeavyDataUris(note.Content);
 
             lock (_notes)
@@ -296,6 +353,7 @@ namespace Portal_Studenta.Services
         {
             if (note == null) throw new ArgumentNullException(nameof(note));
             _locallyDeletedNoteIds.TryRemove(note.Id, out _);
+            _hasPendingLocalSyncChanges = true;
             _ = RemoveLocalTombstoneAsync(note.Id);
             note.UpdatedAt = DateTime.Now;
             note.Content = StripHeavyDataUris(note.Content);
@@ -312,11 +370,101 @@ namespace Portal_Studenta.Services
         }
 
         /// <summary>
-        /// Deletes note from memory and removes its record from the SQLite database.
+        /// Soft-deletes a note by moving it to the 7-day Trash folder.
+        /// </summary>
+        public async Task MoveToTrashAsync(Guid id)
+        {
+            Note? note;
+            lock (_notes)
+            {
+                note = _notes.FirstOrDefault(n => n.Id == id);
+                if (note != null)
+                {
+                    note.IsDeleted = true;
+                    note.DeletedAt = DateTime.UtcNow;
+                    note.IsPinned = false;
+                    note.UpdatedAt = DateTime.Now;
+                }
+            }
+
+            if (note != null)
+            {
+                _hasPendingLocalSyncChanges = true;
+                await PersistNoteToDbAsync(note);
+                OnNotesChanged?.Invoke();
+            }
+        }
+
+        /// <summary>
+        /// Restores a soft-deleted note from the Trash folder back to active notes.
+        /// </summary>
+        public async Task RestoreFromTrashAsync(Guid id)
+        {
+            Note? note;
+            lock (_notes)
+            {
+                note = _notes.FirstOrDefault(n => n.Id == id);
+                if (note != null)
+                {
+                    note.IsDeleted = false;
+                    note.DeletedAt = null;
+                    note.UpdatedAt = DateTime.Now;
+                }
+            }
+
+            if (note != null)
+            {
+                _hasPendingLocalSyncChanges = true;
+                await RemoveLocalTombstoneAsync(id);
+                await PersistNoteToDbAsync(note);
+                OnNotesChanged?.Invoke();
+            }
+        }
+
+        /// <summary>
+        /// Permanently deletes all notes currently in the Trash folder.
+        /// </summary>
+        public async Task<List<Note>> EmptyTrashAsync()
+        {
+            var trashed = GetTrashedNotes();
+            foreach (var n in trashed)
+            {
+                await DeleteNoteAsync(n.Id);
+            }
+            return trashed;
+        }
+
+        /// <summary>
+        /// Checks whether the current user is allowed to edit or delete a note.
+        /// Notes shared with the group that have IsReadOnlyForGroup enabled can only be modified by their author or Starosta/Admin.
+        /// </summary>
+        public static bool CanUserModifyNote(Note? note, string? currentAlbum, string? currentUserName, bool isStarostaOrAdmin)
+        {
+            if (note == null) return false;
+            if (note.SharingMode != NoteSharingMode.SharedWithAll || !note.IsReadOnlyForGroup) return true;
+            if (isStarostaOrAdmin) return true;
+
+            if (!string.IsNullOrWhiteSpace(note.AuthorAlbum) && !string.IsNullOrWhiteSpace(currentAlbum))
+            {
+                return string.Equals(note.AuthorAlbum.Trim(), currentAlbum.Trim(), StringComparison.OrdinalIgnoreCase);
+            }
+
+            if (!string.IsNullOrWhiteSpace(note.Author) && !string.IsNullOrWhiteSpace(currentUserName))
+            {
+                return string.Equals(note.Author.Trim(), currentUserName.Trim(), StringComparison.OrdinalIgnoreCase) ||
+                       string.Equals(note.Author.Trim(), "Ja", StringComparison.OrdinalIgnoreCase);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Permanently deletes note from memory and removes its record from the SQLite database.
         /// </summary>
         public async Task DeleteNoteAsync(Guid id)
         {
             _locallyDeletedNoteIds[id] = DateTime.UtcNow;
+            _hasPendingLocalSyncChanges = true;
             Note? n;
             lock (_notes)
             {
@@ -385,6 +533,7 @@ namespace Portal_Studenta.Services
 
             if (note != null)
             {
+                _hasPendingLocalSyncChanges = true;
                 await PersistNoteToDbAsync(note);
                 OnNotesChanged?.Invoke();
             }
@@ -422,11 +571,40 @@ namespace Portal_Studenta.Services
         public static string StripHeavyDataUris(string? html)
         {
             if (string.IsNullOrWhiteSpace(html)) return string.Empty;
-            if (!html.Contains("data:image", StringComparison.OrdinalIgnoreCase)) return html;
+
+            var result = html;
+
+            // Defense-in-Depth: Usuń niebezpieczne tagi wykonywalne i handlery zdarzeń już na poziomie zapisu w C#
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result,
+                @"<\s*(script|iframe|object|embed|form|meta|base|link)\b[^>]*>[\s\S]*?<\s*/\s*\1\s*>",
+                string.Empty,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result,
+                @"<\s*/?\s*(script|iframe|object|embed|form|meta|base|link)\b[^>]*>",
+                string.Empty,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result,
+                @"\s+on[a-z]+\s*=\s*(""[^""]*""|'[^']*'|[^\s>]+)",
+                string.Empty,
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result,
+                @"(src|href)\s*=\s*([""']?)\s*javascript:[^""'\s>]*\2",
+                "$1=\"\"",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+
+            if (!result.Contains("data:image", StringComparison.OrdinalIgnoreCase)) return result;
 
             // Zdejmij atrybuty src="data:image/..." z tagów z data-attachment-id
-            var result = System.Text.RegularExpressions.Regex.Replace(
-                html,
+            result = System.Text.RegularExpressions.Regex.Replace(
+                result,
                 @"(<img[^>]*\bdata-attachment-id=[^>]*?)\s*src=""data:image\/[^""]*""",
                 "$1",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase
@@ -465,18 +643,21 @@ namespace Portal_Studenta.Services
         // =======================================================
 
         /// <summary>
-        /// Builds hierarchical folder tree combining default system folders (All, Pinned, Shared, Uncategorized)
+        /// Builds hierarchical folder tree combining default system folders (All, Pinned, Shared, Uncategorized, Trash)
         /// with academic subjects and groups retrieved from USOS timetable.
         /// </summary>
         public List<NoteFolderNode> BuildFolderHierarchy(IEnumerable<Lesson>? scheduleLessons)
         {
             var rootFolders = new List<NoteFolderNode>();
 
-            List<Note> allNotesSnapshot;
+            List<Note> allNotesRaw;
             lock (_notes)
             {
-                allNotesSnapshot = _notes.ToList();
+                allNotesRaw = _notes.ToList();
             }
+
+            var allNotesSnapshot = allNotesRaw.Where(n => !n.IsDeleted).ToList();
+            var trashedCount = allNotesRaw.Count(n => n.IsDeleted);
 
             // 1. Domyślne foldery systemowe
             rootFolders.Add(new NoteFolderNode
@@ -531,6 +712,15 @@ namespace Portal_Studenta.Services
                 Icon = "📁",
                 FolderType = NoteFolderType.Uncategorized,
                 NoteCount = allNotesSnapshot.Count(n => string.IsNullOrWhiteSpace(n.Subject))
+            });
+
+            rootFolders.Add(new NoteFolderNode
+            {
+                Id = "system_trash",
+                Name = "Kosz (7 dni)",
+                Icon = "🗑️",
+                FolderType = NoteFolderType.Trash,
+                NoteCount = trashedCount
             });
 
             // 2. Przedmioty z USOS oraz z istniejących notatek
@@ -847,10 +1037,146 @@ namespace Portal_Studenta.Services
         }
 
         /// <summary>
-        /// Synchronizes notes between current device, user's private cloud (BetweenDevices),
-        /// and university group shared notes (SharedWithAll).
+        /// Uploads local attachment binaries to separate Firebase attachment nodes so note metadata remains lightweight.
         /// </summary>
-        public async Task SyncWithCloudAsync(IFirebaseNoteSync firebaseService, string? albumNumber, string? groupCode)
+        public async Task UploadNoteAttachmentsToCloudAsync(IFirebaseNoteSync firebaseService, string? albumNumber, string? groupCode, Note note)
+        {
+            if (firebaseService == null || note?.Attachments == null || note.Attachments.Count == 0) return;
+            if (note.SharingMode == NoteSharingMode.LocalOnly) return;
+
+            foreach (var att in note.Attachments.ToList())
+            {
+                if (string.IsNullOrEmpty(att.LocalPath) || !File.Exists(att.LocalPath)) continue;
+
+                try
+                {
+                    var userKey = $"u:{albumNumber}:{note.Id}:{att.Id}";
+                    var groupKey = $"g:{groupCode}:{note.Id}:{att.Id}";
+
+                    var needUserUpload = !string.IsNullOrWhiteSpace(albumNumber) && !_uploadedCloudAttachmentKeys.ContainsKey(userKey);
+                    var needGroupUpload = note.SharingMode == NoteSharingMode.SharedWithAll &&
+                                          !string.IsNullOrWhiteSpace(groupCode) &&
+                                          !_uploadedCloudAttachmentKeys.ContainsKey(groupKey);
+
+                    if (!needUserUpload && !needGroupUpload) continue;
+
+                    var bytes = await File.ReadAllBytesAsync(att.LocalPath);
+                    if (bytes.Length == 0 || bytes.Length > 4 * 1024 * 1024) continue; // Limit 4 MB na pojedynczy załącznik w RTDB
+
+                    var payload = new CloudNoteAttachmentPayload
+                    {
+                        Id = att.Id,
+                        NoteId = note.Id.ToString(),
+                        FileName = att.FileName,
+                        ContentType = att.ContentType,
+                        SizeBytes = bytes.Length,
+                        Base64Data = Convert.ToBase64String(bytes),
+                        UploadedAt = att.UploadedAt
+                    };
+
+                    if (needUserUpload && !string.IsNullOrWhiteSpace(albumNumber))
+                    {
+                        await firebaseService.UploadUserNoteAttachmentAsync(albumNumber, note.Id, payload);
+                        _uploadedCloudAttachmentKeys[userKey] = true;
+                    }
+
+                    if (needGroupUpload && !string.IsNullOrWhiteSpace(groupCode))
+                    {
+                        await firebaseService.UploadGroupNoteAttachmentAsync(groupCode, note.Id, payload);
+                        _uploadedCloudAttachmentKeys[groupKey] = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[NoteService] UploadNoteAttachmentsToCloudAsync error: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Lazily downloads missing note attachments from Firebase on demand (when opening a note or exporting PDF)
+        /// and caches them on the local filesystem.
+        /// </summary>
+        public async Task<bool> EnsureNoteAttachmentsLoadedFromCloudAsync(Note? note, IFirebaseNoteSync? firebaseService, string? albumNumber, string? groupCode)
+        {
+            if (note == null || firebaseService == null || note.Attachments == null || note.Attachments.Count == 0)
+                return false;
+
+            bool anyDownloaded = false;
+            var attachmentsDir = GetAttachmentsDirectory();
+            var list = note.Attachments.ToList();
+
+            foreach (var att in list)
+            {
+                if (string.IsNullOrWhiteSpace(att.Id))
+                    continue;
+                if (!string.IsNullOrEmpty(att.LocalPath) && File.Exists(att.LocalPath))
+                    continue;
+
+                try
+                {
+                    CloudNoteAttachmentPayload? payload = null;
+                    if (note.SharingMode == NoteSharingMode.SharedWithAll && !string.IsNullOrWhiteSpace(groupCode))
+                    {
+                        payload = await firebaseService.DownloadGroupNoteAttachmentAsync(groupCode, note.Id, att.Id);
+                    }
+                    if (payload == null && !string.IsNullOrWhiteSpace(albumNumber))
+                    {
+                        payload = await firebaseService.DownloadUserNoteAttachmentAsync(albumNumber, note.Id, att.Id);
+                    }
+
+                    if (payload != null && !string.IsNullOrWhiteSpace(payload.Base64Data) && payload.Base64Data.Length <= 6_000_000)
+                    {
+                        var bytes = Convert.FromBase64String(payload.Base64Data);
+                        var rawExt = (Path.GetExtension(att.FileName) ?? "").ToLowerInvariant();
+                        var ext = rawExt is ".jpg" or ".jpeg" or ".png" or ".webp" or ".heic" or ".pdf"
+                            ? rawExt
+                            : (att.ContentType.Contains("pdf", StringComparison.OrdinalIgnoreCase) ? ".pdf" : ".jpg");
+
+                        var safeAttId = new string(att.Id.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_').Take(80).ToArray());
+                        if (string.IsNullOrEmpty(safeAttId)) safeAttId = Guid.NewGuid().ToString("N");
+
+                        var safeBaseName = $"{note.Id}_{safeAttId}";
+                        var targetFilePath = Path.Combine(attachmentsDir, $"{safeBaseName}{ext}");
+                        var thumbFilePath = Path.Combine(attachmentsDir, $"{safeBaseName}_thumb.jpg");
+
+                        await File.WriteAllBytesAsync(targetFilePath, bytes);
+                        att.LocalPath = targetFilePath;
+                        att.SizeBytes = bytes.Length;
+
+                        if (att.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                        {
+                            File.Copy(targetFilePath, thumbFilePath, true);
+                            att.ThumbnailPath = thumbFilePath;
+                        }
+
+                        anyDownloaded = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[NoteService] Lazy attachment download error ({att.Id}): {ex.Message}");
+                }
+            }
+
+            if (anyDownloaded)
+            {
+                lock (_notes)
+                {
+                    note.Attachments = list;
+                }
+                await PersistNoteToDbAsync(note);
+                OnNotesChanged?.Invoke();
+            }
+
+            return anyDownloaded;
+        }
+
+        /// <summary>
+        /// Synchronizes notes between current device, user's private cloud (BetweenDevices),
+        /// and university group shared notes (SharedWithAll) using Delta Sync timestamp checks.
+        /// </summary>
+        public async Task SyncWithCloudAsync(IFirebaseNoteSync firebaseService, string? albumNumber, string? groupCode, bool forceFullSync = false)
         {
             if (firebaseService == null) return;
             if (!await _syncLock.WaitAsync(0)) return;
@@ -858,107 +1184,146 @@ namespace Portal_Studenta.Services
             try
             {
                 await EnsureInitializedAsync();
-                var localNotesSnapshot = GetAllNotes();
+                var localNotesSnapshot = GetAllNotesIncludingTrash();
+                bool anyChangesApplied = false;
+                bool hadPendingLocal = _hasPendingLocalSyncChanges;
 
                 // 1. Synchronizacja prywatna (Moje urządzenia - BetweenDevices & SharedWithAll)
                 if (!string.IsNullOrWhiteSpace(albumNumber))
                 {
-                    var cloudDeletedIds = await firebaseService.GetDeletedNoteIdsFromCloudAsync(albumNumber);
+                    var remoteUserTicks = await firebaseService.GetUserNotesLastModifiedTicksAsync(albumNumber);
+                    bool shouldSyncUser = forceFullSync ||
+                                          hadPendingLocal ||
+                                          _lastSyncedUserCloudTicks == 0 ||
+                                          remoteUserTicks == 0 ||
+                                          remoteUserTicks != _lastSyncedUserCloudTicks;
 
-                    // A. Usuń notatki skasowane w chmurze
-                    foreach (var localNote in localNotesSnapshot)
+                    if (shouldSyncUser)
                     {
-                        if (cloudDeletedIds.Contains(localNote.Id) || _locallyDeletedNoteIds.ContainsKey(localNote.Id))
+                        var cloudDeletedIds = await firebaseService.GetDeletedNoteIdsFromCloudAsync(albumNumber);
+
+                        // A. Usuń notatki trwale skasowane w chmurze
+                        foreach (var localNote in localNotesSnapshot)
                         {
-                            await DeleteNoteAsync(localNote.Id);
-                        }
-                    }
-
-                    var cloudUserNotes = await firebaseService.GetUserNotesFromCloudAsync(albumNumber);
-                    var cloudMap = cloudUserNotes.ToDictionary(n => n.Id, n => n);
-
-                    // Odśwież migawkę po usunięciach
-                    localNotesSnapshot = GetAllNotes();
-
-                    foreach (var cloudNote in cloudUserNotes)
-                    {
-                        // Jeśli notatka została skasowana lokalnie, ale jeszcze wisi w chmurze, usuń z chmury i pomiń
-                        if (_locallyDeletedNoteIds.ContainsKey(cloudNote.Id) || cloudDeletedIds.Contains(cloudNote.Id))
-                        {
-                            await firebaseService.DeleteNoteFromCloudAsync(albumNumber, cloudNote.Id);
-                            continue;
+                            if (cloudDeletedIds.Contains(localNote.Id) || _locallyDeletedNoteIds.ContainsKey(localNote.Id))
+                            {
+                                await DeleteNoteAsync(localNote.Id);
+                                anyChangesApplied = true;
+                            }
                         }
 
-                        var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == cloudNote.Id);
-                        if (localMatch == null)
-                        {
-                            // Nowa notatka z drugiego urządzenia (np. utworzona na telefonie)
-                            AddNote(cloudNote);
-                        }
-                        else if (cloudNote.UpdatedAt > localMatch.UpdatedAt)
-                        {
-                            // Notatka w chmurze ma nowsze zmiany
-                            await SaveNoteAsync(cloudNote);
-                        }
-                        else if (localMatch.UpdatedAt > cloudNote.UpdatedAt && localMatch.SharingMode != NoteSharingMode.LocalOnly)
-                        {
-                            // Notatka lokalna jest nowsza – zaktualizuj chmurę
-                            await firebaseService.SyncNoteToCloudAsync(albumNumber, localMatch);
-                        }
-                    }
+                        var cloudUserNotes = await firebaseService.GetUserNotesFromCloudAsync(albumNumber);
+                        var cloudMap = cloudUserNotes.ToDictionary(n => n.Id, n => n);
 
-                    // Wyślij lokalne notatki BetweenDevices/SharedWithAll, których jeszcze nie ma w chmurze
-                    // (Tylko jeśli nie ma ich w tombstones!)
-                    foreach (var localNote in localNotesSnapshot.Where(n => n.SharingMode is NoteSharingMode.BetweenDevices or NoteSharingMode.SharedWithAll))
-                    {
-                        if (!cloudMap.ContainsKey(localNote.Id) &&
-                            !cloudDeletedIds.Contains(localNote.Id) &&
-                            !_locallyDeletedNoteIds.ContainsKey(localNote.Id))
+                        // Odśwież migawkę po usunięciach
+                        localNotesSnapshot = GetAllNotesIncludingTrash();
+
+                        foreach (var cloudNote in cloudUserNotes)
                         {
-                            await firebaseService.SyncNoteToCloudAsync(albumNumber, localNote);
+                            // Jeśli notatka została trwale skasowana lokalnie, ale jeszcze wisi w chmurze, usuń z chmury i pomiń
+                            if (_locallyDeletedNoteIds.ContainsKey(cloudNote.Id) || cloudDeletedIds.Contains(cloudNote.Id))
+                            {
+                                await firebaseService.DeleteNoteFromCloudAsync(albumNumber, cloudNote.Id);
+                                continue;
+                            }
+
+                            var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == cloudNote.Id);
+                            if (localMatch == null)
+                            {
+                                // Nowa notatka z drugiego urządzenia (np. utworzona na telefonie)
+                                AddNote(cloudNote);
+                                anyChangesApplied = true;
+                            }
+                            else if (cloudNote.UpdatedAt > localMatch.UpdatedAt)
+                            {
+                                // Zachowaj lokalne ścieżki załączników, jeśli są już pobrane na tym urządzeniu
+                                MergeLocalAttachmentPaths(localMatch, cloudNote);
+                                await SaveNoteAsync(cloudNote);
+                                anyChangesApplied = true;
+                            }
+                            else if (localMatch.UpdatedAt > cloudNote.UpdatedAt && localMatch.SharingMode != NoteSharingMode.LocalOnly)
+                            {
+                                // Notatka lokalna jest nowsza – zaktualizuj chmurę oraz wyślij załączniki
+                                await firebaseService.SyncNoteToCloudAsync(albumNumber, localMatch);
+                                await UploadNoteAttachmentsToCloudAsync(firebaseService, albumNumber, groupCode, localMatch);
+                            }
                         }
+
+                        // Wyślij lokalne notatki BetweenDevices/SharedWithAll, których jeszcze nie ma w chmurze
+                        foreach (var localNote in localNotesSnapshot.Where(n => n.SharingMode is NoteSharingMode.BetweenDevices or NoteSharingMode.SharedWithAll))
+                        {
+                            if (!cloudMap.ContainsKey(localNote.Id) &&
+                                !cloudDeletedIds.Contains(localNote.Id) &&
+                                !_locallyDeletedNoteIds.ContainsKey(localNote.Id))
+                            {
+                                await firebaseService.SyncNoteToCloudAsync(albumNumber, localNote);
+                                await UploadNoteAttachmentsToCloudAsync(firebaseService, albumNumber, groupCode, localNote);
+                            }
+                        }
+
+                        _lastSyncedUserCloudTicks = await firebaseService.GetUserNotesLastModifiedTicksAsync(albumNumber);
                     }
                 }
 
                 // 2. Synchronizacja grupowa (Udostępnione wszystkim - SharedWithAll)
                 if (!string.IsNullOrWhiteSpace(groupCode))
                 {
-                    var groupDeletedIds = await firebaseService.GetGroupDeletedNoteIdsFromCloudAsync(groupCode);
+                    var remoteGroupTicks = await firebaseService.GetGroupNotesLastModifiedTicksAsync(groupCode);
+                    bool shouldSyncGroup = forceFullSync ||
+                                           hadPendingLocal ||
+                                           _lastSyncedGroupCloudTicks == 0 ||
+                                           remoteGroupTicks == 0 ||
+                                           remoteGroupTicks != _lastSyncedGroupCloudTicks;
 
-                    // Usuń lokalnie notatki usunięte z lobby grupy
-                    foreach (var localNote in localNotesSnapshot.Where(n => n.SharingMode == NoteSharingMode.SharedWithAll))
+                    if (shouldSyncGroup)
                     {
-                        if (groupDeletedIds.Contains(localNote.Id))
-                        {
-                            await DeleteNoteAsync(localNote.Id);
-                        }
-                    }
+                        var groupDeletedIds = await firebaseService.GetGroupDeletedNoteIdsFromCloudAsync(groupCode);
 
-                    var groupNotes = await firebaseService.GetGroupSharedNotesAsync(groupCode);
-                    localNotesSnapshot = GetAllNotes();
-
-                    foreach (var gNote in groupNotes)
-                    {
-                        if (groupDeletedIds.Contains(gNote.Id) || _locallyDeletedNoteIds.ContainsKey(gNote.Id))
+                        // Usuń lokalnie notatki usunięte z lobby grupy
+                        foreach (var localNote in localNotesSnapshot.Where(n => n.SharingMode == NoteSharingMode.SharedWithAll))
                         {
-                            continue;
+                            if (groupDeletedIds.Contains(localNote.Id))
+                            {
+                                await DeleteNoteAsync(localNote.Id);
+                                anyChangesApplied = true;
+                            }
                         }
 
-                        var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == gNote.Id);
-                        if (localMatch == null)
+                        var groupNotes = await firebaseService.GetGroupSharedNotesAsync(groupCode);
+                        localNotesSnapshot = GetAllNotesIncludingTrash();
+
+                        foreach (var gNote in groupNotes)
                         {
-                            gNote.SharingMode = NoteSharingMode.SharedWithAll;
-                            AddNote(gNote);
+                            if (groupDeletedIds.Contains(gNote.Id) || _locallyDeletedNoteIds.ContainsKey(gNote.Id))
+                            {
+                                continue;
+                            }
+
+                            var localMatch = localNotesSnapshot.FirstOrDefault(l => l.Id == gNote.Id);
+                            if (localMatch == null)
+                            {
+                                gNote.SharingMode = NoteSharingMode.SharedWithAll;
+                                AddNote(gNote);
+                                anyChangesApplied = true;
+                            }
+                            else if (gNote.UpdatedAt > localMatch.UpdatedAt)
+                            {
+                                gNote.SharingMode = NoteSharingMode.SharedWithAll;
+                                MergeLocalAttachmentPaths(localMatch, gNote);
+                                await SaveNoteAsync(gNote);
+                                anyChangesApplied = true;
+                            }
                         }
-                        else if (gNote.UpdatedAt > localMatch.UpdatedAt)
-                        {
-                            gNote.SharingMode = NoteSharingMode.SharedWithAll;
-                            await SaveNoteAsync(gNote);
-                        }
+
+                        _lastSyncedGroupCloudTicks = await firebaseService.GetGroupNotesLastModifiedTicksAsync(groupCode);
                     }
                 }
 
-                OnNotesChanged?.Invoke();
+                _hasPendingLocalSyncChanges = false;
+                if (anyChangesApplied)
+                {
+                    OnNotesChanged?.Invoke();
+                }
             }
             catch (Exception ex)
             {
@@ -968,6 +1333,26 @@ namespace Portal_Studenta.Services
             {
                 _syncLock.Release();
             }
+        }
+
+        private static void MergeLocalAttachmentPaths(Note existingLocal, Note incomingCloud)
+        {
+            if (existingLocal.Attachments.Count == 0 || incomingCloud.Attachments.Count == 0) return;
+
+            var localById = existingLocal.Attachments.ToDictionary(a => a.Id, a => a);
+            var merged = incomingCloud.Attachments.ToList();
+            foreach (var att in merged)
+            {
+                if (localById.TryGetValue(att.Id, out var localAtt))
+                {
+                    if (!string.IsNullOrEmpty(localAtt.LocalPath) && File.Exists(localAtt.LocalPath))
+                    {
+                        att.LocalPath = localAtt.LocalPath;
+                        att.ThumbnailPath = localAtt.ThumbnailPath;
+                    }
+                }
+            }
+            incomingCloud.Attachments = merged;
         }
 
         public void Dispose()

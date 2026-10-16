@@ -30,8 +30,7 @@
         <MauiXamlInflator>SourceGen</MauiXamlInflator>
 
         <!-- Display name -->
-        <ApplicationTitle Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">Portal Studenta</ApplicationTitle>
-        <ApplicationTitle Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'maccatalyst'">UniAvio</ApplicationTitle>
+        <ApplicationTitle>UniAvio</ApplicationTitle>
 
         <!-- App Identifier -->
         <ApplicationId>L0CZ3K.UniAvio</ApplicationId>

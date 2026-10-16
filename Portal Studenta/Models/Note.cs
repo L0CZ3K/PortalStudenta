@@ -32,9 +32,16 @@ namespace Portal_Studenta.Models
         public DateTime CreatedAt { get; set; } = DateTime.Now;
         public DateTime UpdatedAt { get; set; } = DateTime.Now;
         public string Author { get; set; } = "Ja";
+        public string AuthorAlbum { get; set; } = string.Empty;
 
         // Flagi i integracja z chmurą / grupą
         public bool IsPinned { get; set; }
+        public bool IsReadOnlyForGroup { get; set; }
+
+        // Soft-Delete (Kosz na 7 dni)
+        [Indexed]
+        public bool IsDeleted { get; set; }
+        public DateTime? DeletedAt { get; set; }
 
         [Indexed]
         public NoteSharingMode SharingMode { get; set; } = NoteSharingMode.BetweenDevices;

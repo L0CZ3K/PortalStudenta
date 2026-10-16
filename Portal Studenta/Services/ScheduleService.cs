@@ -12,6 +12,10 @@ namespace Portal_Studenta.Services
         private readonly ProfileService? _profileService;
         private readonly NotificationService? _notificationService;
 
+        private readonly object _collectionsLock = new();
+        private readonly SemaphoreSlim _diskIoLock = new(1, 1);
+        private int _isCloudSyncing = 0;
+
         private List<Lesson> _lessons = new();
         private List<Lesson> _godModeLessons = new();
         public List<Lesson> CustomEvents { get; set; } = new();
@@ -21,15 +25,29 @@ namespace Portal_Studenta.Services
         private DateTime? _lastGodModeFetchTime;
 
         public bool IsLoaded { get; private set; } = false;
-        public bool IsGodModeLoaded => _godModeLessons.Any();
+        public bool IsGodModeLoaded
+        {
+            get
+            {
+                lock (_collectionsLock)
+                {
+                    return _godModeLessons.Any();
+                }
+            }
+        }
         public event Action? OnScheduleLoaded;
 
         public const int CacheValidityMinutes = 60;
 
-        public bool IsGodModeFresh(DateTime start, int days) =>
-            _godModeLessons.Any(l => l.Start >= start && l.Start < start.AddDays(days)) &&
-            _lastGodModeFetchTime.HasValue &&
-            (DateTime.UtcNow - _lastGodModeFetchTime.Value).TotalMinutes < 30;
+        public bool IsGodModeFresh(DateTime start, int days)
+        {
+            lock (_collectionsLock)
+            {
+                return _godModeLessons.Any(l => l.Start >= start && l.Start < start.AddDays(days)) &&
+                       _lastGodModeFetchTime.HasValue &&
+                       (DateTime.UtcNow - _lastGodModeFetchTime.Value).TotalMinutes < 30;
+            }
+        }
 
         public DateTime? LastUsosFetchTime
         {
@@ -55,8 +73,16 @@ namespace Portal_Studenta.Services
             }
         }
 
-        public bool IsCacheFresh =>
-            ScheduleLogic.IsCacheFresh(_lessons.Count, LastUsosFetchTime, DateTime.UtcNow, CacheValidityMinutes);
+        public bool IsCacheFresh
+        {
+            get
+            {
+                lock (_collectionsLock)
+                {
+                    return ScheduleLogic.IsCacheFresh(_lessons.Count, LastUsosFetchTime, DateTime.UtcNow, CacheValidityMinutes);
+                }
+            }
+        }
 
         public string? LastUsosErrorMessage { get; private set; }
         public bool HasUsosAuthError { get; private set; }
@@ -173,43 +199,47 @@ namespace Portal_Studenta.Services
                 _groupEventsSubscription = null;
                 _subscribedGroupCode = "";
 
-                // 1. Usuń wszystkie wydarzenia starosty z grupy (STAR)
-                CustomEvents.RemoveAll(c => !c.IsPersonal || c.Type == "STAR");
+                lock (_collectionsLock)
+                {
+                    // 1. Usuń wszystkie wydarzenia starosty z grupy (STAR)
+                    CustomEvents.RemoveAll(c => !c.IsPersonal || c.Type == "STAR");
+
+                    // 2. Usuń modyfikacje należące do grupy z pamięci
+                    var groupKeys = _modifications.Values.Where(m => m.IsGroupModification).Select(m => m.LessonKey).ToList();
+                    foreach (var gk in groupKeys)
+                    {
+                        _modifications.Remove(gk);
+                    }
+
+                    // 3. Przywróć czysty plan z USOS (z pliku cache) i nałóż wyłącznie modyfikacje osobiste
+                    if (File.Exists(CacheFilePath))
+                    {
+                        var json = File.ReadAllText(CacheFilePath);
+                        var cached = JsonSerializer.Deserialize<List<Lesson>>(json);
+                        if (cached != null && cached.Any())
+                        {
+                            _lessons = cached;
+                        }
+                    }
+                    else
+                    {
+                        foreach (var l in _lessons)
+                        {
+                            l.IsCanceled = false;
+                            if (l.OriginalStart != default) l.Start = l.OriginalStart;
+                            if (l.OriginalEnd != default) l.End = l.OriginalEnd;
+                            if (!string.IsNullOrEmpty(l.OriginalPlace)) l.Place = l.OriginalPlace;
+                            l.HasExam = false;
+                            l.HasTask = false;
+                            l.TaskDetails = string.Empty;
+                        }
+                    }
+
+                    ApplyModifications(_lessons);
+                }
+
                 SaveCustomEventsToDisk();
-
-                // 2. Usuń modyfikacje należące do grupy z pamięci
-                var groupKeys = _modifications.Values.Where(m => m.IsGroupModification).Select(m => m.LessonKey).ToList();
-                foreach (var gk in groupKeys)
-                {
-                    _modifications.Remove(gk);
-                }
                 SaveModificationsToDisk();
-
-                // 3. Przywróć czysty plan z USOS (z pliku cache) i nałóż wyłącznie modyfikacje osobiste
-                if (File.Exists(CacheFilePath))
-                {
-                    var json = File.ReadAllText(CacheFilePath);
-                    var cached = JsonSerializer.Deserialize<List<Lesson>>(json);
-                    if (cached != null && cached.Any())
-                    {
-                        _lessons = cached;
-                    }
-                }
-                else
-                {
-                    foreach (var l in _lessons)
-                    {
-                        l.IsCanceled = false;
-                        if (l.OriginalStart != default) l.Start = l.OriginalStart;
-                        if (l.OriginalEnd != default) l.End = l.OriginalEnd;
-                        if (!string.IsNullOrEmpty(l.OriginalPlace)) l.Place = l.OriginalPlace;
-                        l.HasExam = false;
-                        l.HasTask = false;
-                        l.TaskDetails = string.Empty;
-                    }
-                }
-
-                ApplyModifications(_lessons);
                 SaveCacheToDisk();
                 OnScheduleLoaded?.Invoke();
             }
@@ -234,27 +264,53 @@ namespace Portal_Studenta.Services
 
         public void Clear()
         {
-            _lessons.Clear();
-            _godModeLessons.Clear();
-            CustomEvents.Clear();
-            _modifications.Clear();
-            IsLoaded = false;
-            LastUsosFetchTime = null;
-            _lastGodModeFetchTime = null;
-            HasUsosAuthError = false;
-            LastUsosErrorMessage = null;
+            lock (_collectionsLock)
+            {
+                _lessons.Clear();
+                _godModeLessons.Clear();
+                CustomEvents.Clear();
+                _modifications.Clear();
+                IsLoaded = false;
+                LastUsosFetchTime = null;
+                _lastGodModeFetchTime = null;
+                HasUsosAuthError = false;
+                LastUsosErrorMessage = null;
+            }
             try
             {
                 if (File.Exists(CacheFilePath)) File.Delete(CacheFilePath);
                 if (File.Exists(ModificationsFilePath)) File.Delete(ModificationsFilePath);
                 if (File.Exists(CustomEventsFilePath)) File.Delete(CustomEventsFilePath);
             }
-            catch {}
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[ScheduleService] Clear cache files error: {ex.Message}");
+            }
         }
 
         public static string GetLessonKey(Lesson l)
         {
             return ScheduleLogic.GetLessonKey(l);
+        }
+
+        private void WriteFileAsyncInBackground(string path, string content)
+        {
+            _ = Task.Run(async () =>
+            {
+                await _diskIoLock.WaitAsync();
+                try
+                {
+                    await File.WriteAllTextAsync(path, content);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ScheduleService] Błąd asynchronicznego zapisu na dysk ({Path.GetFileName(path)}): {ex.Message}");
+                }
+                finally
+                {
+                    _diskIoLock.Release();
+                }
+            });
         }
 
         private void LoadModificationsFromDisk()
@@ -267,7 +323,10 @@ namespace Portal_Studenta.Services
                     var list = JsonSerializer.Deserialize<List<LessonModification>>(json);
                     if (list != null)
                     {
-                        _modifications = list.ToDictionary(m => m.LessonKey, m => m, StringComparer.OrdinalIgnoreCase);
+                        lock (_collectionsLock)
+                        {
+                            _modifications = list.ToDictionary(m => m.LessonKey, m => m, StringComparer.OrdinalIgnoreCase);
+                        }
                     }
                 }
             }
@@ -281,8 +340,13 @@ namespace Portal_Studenta.Services
         {
             try
             {
-                var json = JsonSerializer.Serialize(_modifications.Values.ToList(), IndentedJsonOptions);
-                File.WriteAllText(ModificationsFilePath, json);
+                List<LessonModification> snapshot;
+                lock (_collectionsLock)
+                {
+                    snapshot = _modifications.Values.ToList();
+                }
+                var json = JsonSerializer.Serialize(snapshot, IndentedJsonOptions);
+                WriteFileAsyncInBackground(ModificationsFilePath, json);
             }
             catch (Exception ex)
             {
@@ -300,7 +364,10 @@ namespace Portal_Studenta.Services
                     var cached = JsonSerializer.Deserialize<List<Lesson>>(json);
                     if (cached != null)
                     {
-                        CustomEvents = cached;
+                        lock (_collectionsLock)
+                        {
+                            CustomEvents = cached;
+                        }
                     }
                 }
             }
@@ -314,8 +381,13 @@ namespace Portal_Studenta.Services
         {
             try
             {
-                var json = JsonSerializer.Serialize(CustomEvents, IndentedJsonOptions);
-                File.WriteAllText(CustomEventsFilePath, json);
+                List<Lesson> snapshot;
+                lock (_collectionsLock)
+                {
+                    snapshot = CustomEvents.ToList();
+                }
+                var json = JsonSerializer.Serialize(snapshot, IndentedJsonOptions);
+                WriteFileAsyncInBackground(CustomEventsFilePath, json);
             }
             catch (Exception ex)
             {
@@ -336,7 +408,10 @@ namespace Portal_Studenta.Services
                     }
                     Preferences.Default.Set("schedule_cache_version", 2);
                     LastUsosFetchTime = null;
-                    _lessons.Clear();
+                    lock (_collectionsLock)
+                    {
+                        _lessons.Clear();
+                    }
                     return;
                 }
 
@@ -346,10 +421,15 @@ namespace Portal_Studenta.Services
                     var cached = JsonSerializer.Deserialize<List<Lesson>>(json);
                     if (cached != null && cached.Any())
                     {
-                        _lessons = cached;
-                        ApplyModifications(_lessons);
-                        IsLoaded = true;
-                        _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(_lessons);
+                        List<Lesson> reminderSnapshot;
+                        lock (_collectionsLock)
+                        {
+                            _lessons = cached;
+                            ApplyModifications(_lessons);
+                            IsLoaded = true;
+                            reminderSnapshot = _lessons.ToList();
+                        }
+                        _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(reminderSnapshot);
                     }
                 }
             }
@@ -363,8 +443,13 @@ namespace Portal_Studenta.Services
         {
             try
             {
-                var json = JsonSerializer.Serialize(_lessons, IndentedJsonOptions);
-                File.WriteAllText(CacheFilePath, json);
+                List<Lesson> snapshot;
+                lock (_collectionsLock)
+                {
+                    snapshot = _lessons.ToList();
+                }
+                var json = JsonSerializer.Serialize(snapshot, IndentedJsonOptions);
+                WriteFileAsyncInBackground(CacheFilePath, json);
             }
             catch (Exception ex)
             {
@@ -374,32 +459,39 @@ namespace Portal_Studenta.Services
 
         public void ApplyModifications(List<Lesson> lessons)
         {
-            ScheduleLogic.ApplyModifications(lessons, _modifications);
+            lock (_collectionsLock)
+            {
+                ScheduleLogic.ApplyModifications(lessons, _modifications);
+            }
         }
 
         public async Task CancelLessonAsync(Lesson lesson, string? reason = null)
         {
             var key = GetLessonKey(lesson);
             bool isGroup = _appState != null && !string.IsNullOrEmpty(_appState.GroupCode) && _appState.HasManagementPrivileges;
-            if (!_modifications.TryGetValue(key, out var mod))
+            LessonModification mod;
+            lock (_collectionsLock)
             {
-                mod = new LessonModification
+                if (!_modifications.TryGetValue(key, out mod!))
                 {
-                    LessonKey = key,
-                    Title = lesson.Title,
-                    OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start,
-                    IsGroupModification = isGroup,
-                    GroupCode = _appState?.GroupCode
-                };
-                _modifications[key] = mod;
-            }
-            mod.IsCanceled = true;
-            mod.CancelReason = reason;
-            mod.IsGroupModification = isGroup;
-            mod.GroupCode = _appState?.GroupCode;
+                    mod = new LessonModification
+                    {
+                        LessonKey = key,
+                        Title = lesson.Title,
+                        OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start,
+                        IsGroupModification = isGroup,
+                        GroupCode = _appState?.GroupCode
+                    };
+                    _modifications[key] = mod;
+                }
+                mod.IsCanceled = true;
+                mod.CancelReason = reason;
+                mod.IsGroupModification = isGroup;
+                mod.GroupCode = _appState?.GroupCode;
 
-            lesson.IsCanceled = true;
-            if (!string.IsNullOrWhiteSpace(reason)) lesson.Desc = reason;
+                lesson.IsCanceled = true;
+                if (!string.IsNullOrWhiteSpace(reason)) lesson.Desc = reason;
+            }
 
             SaveModificationsToDisk();
             SaveCacheToDisk();
@@ -411,14 +503,18 @@ namespace Portal_Studenta.Services
         {
             var key = GetLessonKey(lesson);
             bool isGroup = _appState != null && !string.IsNullOrEmpty(_appState.GroupCode) && _appState.HasManagementPrivileges;
-            if (_modifications.TryGetValue(key, out var mod))
+            LessonModification? mod;
+            lock (_collectionsLock)
             {
-                mod.IsCanceled = false;
-                mod.CancelReason = null;
-                mod.IsGroupModification = isGroup;
-                mod.GroupCode = _appState?.GroupCode;
+                if (_modifications.TryGetValue(key, out mod))
+                {
+                    mod.IsCanceled = false;
+                    mod.CancelReason = null;
+                    mod.IsGroupModification = isGroup;
+                    mod.GroupCode = _appState?.GroupCode;
+                }
+                lesson.IsCanceled = false;
             }
-            lesson.IsCanceled = false;
 
             SaveModificationsToDisk();
             SaveCacheToDisk();
@@ -430,27 +526,31 @@ namespace Portal_Studenta.Services
         {
             var key = GetLessonKey(lesson);
             bool isGroup = _appState != null && !string.IsNullOrEmpty(_appState.GroupCode) && _appState.HasManagementPrivileges;
-            if (!_modifications.TryGetValue(key, out var mod))
+            LessonModification mod;
+            lock (_collectionsLock)
             {
-                mod = new LessonModification
+                if (!_modifications.TryGetValue(key, out mod!))
                 {
-                    LessonKey = key,
-                    Title = lesson.Title,
-                    OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start,
-                    IsGroupModification = isGroup,
-                    GroupCode = _appState?.GroupCode
-                };
-                _modifications[key] = mod;
-            }
-            if (lesson.OriginalStart == default) lesson.OriginalStart = lesson.Start;
-            if (lesson.OriginalEnd == default) lesson.OriginalEnd = lesson.End;
+                    mod = new LessonModification
+                    {
+                        LessonKey = key,
+                        Title = lesson.Title,
+                        OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start,
+                        IsGroupModification = isGroup,
+                        GroupCode = _appState?.GroupCode
+                    };
+                    _modifications[key] = mod;
+                }
+                if (lesson.OriginalStart == default) lesson.OriginalStart = lesson.Start;
+                if (lesson.OriginalEnd == default) lesson.OriginalEnd = lesson.End;
 
-            lesson.Start = newStart;
-            lesson.End = newEnd;
-            mod.ModifiedStart = newStart;
-            mod.ModifiedEnd = newEnd;
-            mod.IsGroupModification = isGroup;
-            mod.GroupCode = _appState?.GroupCode;
+                lesson.Start = newStart;
+                lesson.End = newEnd;
+                mod.ModifiedStart = newStart;
+                mod.ModifiedEnd = newEnd;
+                mod.IsGroupModification = isGroup;
+                mod.GroupCode = _appState?.GroupCode;
+            }
 
             SaveModificationsToDisk();
             SaveCacheToDisk();
@@ -466,54 +566,66 @@ namespace Portal_Studenta.Services
 
             if (allFutureSemesterClasses)
             {
-                var futureLessons = ScheduleLogic.FindMatchingSemesterLessons(_lessons, lesson);
-                count = futureLessons.Count;
-
-                foreach (var fl in futureLessons)
+                List<(LessonModification mod, Lesson fl)> toSync = new();
+                lock (_collectionsLock)
                 {
-                    var key = GetLessonKey(fl);
-                    if (!_modifications.TryGetValue(key, out var mod))
+                    var futureLessons = ScheduleLogic.FindMatchingSemesterLessons(_lessons, lesson);
+                    count = futureLessons.Count;
+
+                    foreach (var fl in futureLessons)
+                    {
+                        var key = GetLessonKey(fl);
+                        if (!_modifications.TryGetValue(key, out var mod))
+                        {
+                            mod = new LessonModification
+                            {
+                                LessonKey = key,
+                                Title = fl.Title,
+                                OriginalStart = fl.OriginalStart != default ? fl.OriginalStart : fl.Start,
+                                IsGroupModification = isGroup,
+                                GroupCode = grpCode
+                            };
+                            _modifications[key] = mod;
+                        }
+                        if (string.IsNullOrEmpty(fl.OriginalPlace)) fl.OriginalPlace = fl.Place;
+                        fl.Place = newPlace;
+                        mod.ModifiedPlace = newPlace;
+                        mod.IsGroupModification = isGroup;
+                        mod.GroupCode = grpCode;
+                        toSync.Add((mod, fl));
+                    }
+                }
+
+                foreach (var item in toSync)
+                {
+                    await SyncModificationToFirebaseAsync(item.mod, item.fl);
+                }
+            }
+            else
+            {
+                LessonModification mod;
+                lock (_collectionsLock)
+                {
+                    var key = GetLessonKey(lesson);
+                    if (!_modifications.TryGetValue(key, out mod!))
                     {
                         mod = new LessonModification
                         {
                             LessonKey = key,
-                            Title = fl.Title,
-                            OriginalStart = fl.OriginalStart != default ? fl.OriginalStart : fl.Start,
+                            Title = lesson.Title,
+                            OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start,
                             IsGroupModification = isGroup,
                             GroupCode = grpCode
                         };
                         _modifications[key] = mod;
                     }
-                    if (string.IsNullOrEmpty(fl.OriginalPlace)) fl.OriginalPlace = fl.Place;
-                    fl.Place = newPlace;
+                    if (string.IsNullOrEmpty(lesson.OriginalPlace)) lesson.OriginalPlace = lesson.Place;
+
+                    lesson.Place = newPlace;
                     mod.ModifiedPlace = newPlace;
                     mod.IsGroupModification = isGroup;
                     mod.GroupCode = grpCode;
-
-                    await SyncModificationToFirebaseAsync(mod, fl);
                 }
-            }
-            else
-            {
-                var key = GetLessonKey(lesson);
-                if (!_modifications.TryGetValue(key, out var mod))
-                {
-                    mod = new LessonModification
-                    {
-                        LessonKey = key,
-                        Title = lesson.Title,
-                        OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start,
-                        IsGroupModification = isGroup,
-                        GroupCode = grpCode
-                    };
-                    _modifications[key] = mod;
-                }
-                if (string.IsNullOrEmpty(lesson.OriginalPlace)) lesson.OriginalPlace = lesson.Place;
-
-                lesson.Place = newPlace;
-                mod.ModifiedPlace = newPlace;
-                mod.IsGroupModification = isGroup;
-                mod.GroupCode = grpCode;
 
                 await SyncModificationToFirebaseAsync(mod, lesson);
             }
@@ -527,20 +639,24 @@ namespace Portal_Studenta.Services
         public async Task AddTaskOrExamAsync(Lesson lesson, bool isExam, string details)
         {
             var key = GetLessonKey(lesson);
-            if (!_modifications.TryGetValue(key, out var mod))
+            LessonModification mod;
+            lock (_collectionsLock)
             {
-                mod = new LessonModification
+                if (!_modifications.TryGetValue(key, out mod!))
                 {
-                    LessonKey = key,
-                    Title = lesson.Title,
-                    OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start
-                };
-                _modifications[key] = mod;
+                    mod = new LessonModification
+                    {
+                        LessonKey = key,
+                        Title = lesson.Title,
+                        OriginalStart = lesson.OriginalStart != default ? lesson.OriginalStart : lesson.Start
+                    };
+                    _modifications[key] = mod;
+                }
+                if (isExam) { lesson.HasExam = true; lesson.IsHighPriority = true; mod.HasExam = true; }
+                else { lesson.HasTask = true; mod.HasTask = true; }
+                lesson.TaskDetails = details;
+                mod.TaskDetails = details;
             }
-            if (isExam) { lesson.HasExam = true; lesson.IsHighPriority = true; mod.HasExam = true; }
-            else { lesson.HasTask = true; mod.HasTask = true; }
-            lesson.TaskDetails = details;
-            mod.TaskDetails = details;
 
             SaveModificationsToDisk();
             SaveCacheToDisk();
@@ -550,8 +666,6 @@ namespace Portal_Studenta.Services
 
         public async Task AddCustomEventAsync(Lesson ev)
         {
-            if (ev.Id <= 0) ev.Id = ScheduleLogic.GenerateUniqueEventId(CustomEvents.Select(c => c.Id));
-            
             // Security check: Only users with management privileges can publish group/STAR events
             bool canPublishGroup = _appState != null && !string.IsNullOrEmpty(_appState.GroupCode) && _appState.HasManagementPrivileges;
             if ((!ev.IsPersonal || ev.Type == "STAR") && !canPublishGroup)
@@ -562,8 +676,12 @@ namespace Portal_Studenta.Services
                 ev.Person = "Ja";
             }
 
-            CustomEvents.RemoveAll(c => c.Id == ev.Id || (c.Title == ev.Title && c.Start == ev.Start && c.IsPersonal == ev.IsPersonal));
-            CustomEvents.Add(ev);
+            lock (_collectionsLock)
+            {
+                if (ev.Id <= 0) ev.Id = ScheduleLogic.GenerateUniqueEventId(CustomEvents.Select(c => c.Id));
+                CustomEvents.RemoveAll(c => c.Id == ev.Id || (c.Title == ev.Title && c.Start == ev.Start && c.IsPersonal == ev.IsPersonal));
+                CustomEvents.Add(ev);
+            }
             SaveCustomEventsToDisk();
 
             if (_firebaseService != null)
@@ -625,7 +743,10 @@ namespace Portal_Studenta.Services
         public async Task DeleteCustomEventAsync(Lesson ev)
         {
             bool canManageGroup = _appState != null && !string.IsNullOrEmpty(_appState.GroupCode) && _appState.HasManagementPrivileges;
-            CustomEvents.RemoveAll(c => c.Id == ev.Id || (c.Title == ev.Title && c.Start == ev.Start));
+            lock (_collectionsLock)
+            {
+                CustomEvents.RemoveAll(c => c.Id == ev.Id || (c.Title == ev.Title && c.Start == ev.Start));
+            }
             SaveCustomEventsToDisk();
 
             if (_firebaseService != null)
@@ -786,14 +907,23 @@ namespace Portal_Studenta.Services
                     {
                         if (ge != null)
                         {
-                            bool changed = ProcessGroupEvent(ge);
+                            bool changed;
+                            List<Lesson> reminderSnapshot;
+                            lock (_collectionsLock)
+                            {
+                                changed = ProcessGroupEvent(ge);
+                                if (changed)
+                                {
+                                    ApplyModifications(_lessons);
+                                }
+                                reminderSnapshot = _lessons.ToList();
+                            }
                             if (changed)
                             {
-                                ApplyModifications(_lessons);
                                 SaveModificationsToDisk();
                                 SaveCustomEventsToDisk();
                                 SaveCacheToDisk();
-                                _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(_lessons);
+                                _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(reminderSnapshot);
                                 OnScheduleLoaded?.Invoke();
                             }
                         }
@@ -809,146 +939,165 @@ namespace Portal_Studenta.Services
         public async Task SyncCloudEventsAsync()
         {
             if (_firebaseService == null) return;
+            if (Interlocked.CompareExchange(ref _isCloudSyncing, 1, 0) != 0) return;
 
-            bool hasChanges = false;
-
-            // 1. Synchronizacja wydarzeń i modyfikacji grupy (Starosta/Admin -> widzą wszyscy w grupie)
-            if (_appState != null && !string.IsNullOrEmpty(_appState.GroupCode))
+            try
             {
-                EnsureGroupEventsSubscription(_appState.GroupCode);
+                bool hasChanges = false;
 
-                try
+                // 1. Synchronizacja wydarzeń i modyfikacji grupy (Starosta/Admin -> widzą wszyscy w grupie)
+                if (_appState != null && !string.IsNullOrEmpty(_appState.GroupCode))
                 {
-                    var groupEvents = await _firebaseService.GetGroupEventsAsync(_appState.GroupCode);
+                    EnsureGroupEventsSubscription(_appState.GroupCode);
 
-                    // A. Usuwanie zdarzeń grupy, które zostały usunięte w chmurze
-                    var activeGroupUids = new HashSet<string>(groupEvents.Select(g => g.Uid), StringComparer.OrdinalIgnoreCase);
-                    int removedGroupCount = CustomEvents.RemoveAll(c =>
-                        (!c.IsPersonal || c.Type == "STAR") &&
-                        !activeGroupUids.Contains("STAR_" + c.Id) &&
-                        !activeGroupUids.Contains(c.Id.ToString()) &&
-                        !groupEvents.Any(ge => (ge.Type == "STAR" || (ge.Uid != null && ge.Uid.StartsWith("STAR_"))) && ge.Title == c.Title && ge.Start == c.Start));
-                    if (removedGroupCount > 0) hasChanges = true;
-
-                    // B. Dodawanie / aktualizacja zdarzeń grupy
-                    foreach (var ge in groupEvents)
+                    try
                     {
-                        if (ProcessGroupEvent(ge))
+                        var groupEvents = await _firebaseService.GetGroupEventsAsync(_appState.GroupCode);
+
+                        lock (_collectionsLock)
                         {
-                            hasChanges = true;
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[ScheduleService] Błąd pobierania zdarzeń grupy: {ex.Message}");
-                }
-            }
+                            // A. Usuwanie zdarzeń grupy, które zostały usunięte w chmurze
+                            var activeGroupUids = new HashSet<string>(groupEvents.Select(g => g.Uid), StringComparer.OrdinalIgnoreCase);
+                            int removedGroupCount = CustomEvents.RemoveAll(c =>
+                                (!c.IsPersonal || c.Type == "STAR") &&
+                                !activeGroupUids.Contains("STAR_" + c.Id) &&
+                                !activeGroupUids.Contains(c.Id.ToString()) &&
+                                !groupEvents.Any(ge => (ge.Type == "STAR" || (ge.Uid != null && ge.Uid.StartsWith("STAR_"))) && ge.Title == c.Title && ge.Start == c.Start));
+                            if (removedGroupCount > 0) hasChanges = true;
 
-            // 2. Synchronizacja osobistych wydarzeń i modyfikacji (Cross-Device Sync użytkownika)
-            string userKey = GetCurrentUserKey();
-            if (!string.IsNullOrEmpty(userKey))
-            {
-                try
-                {
-                    var personalEvents = await _firebaseService.GetPersonalEventsAsync(userKey);
-
-                    // A. Usuwanie zdarzeń osobistych usuniętych na innym urządzeniu
-                    var activePersonalUids = new HashSet<string>(personalEvents.Select(p => p.Uid), StringComparer.OrdinalIgnoreCase);
-                    int removedPersonalCount = CustomEvents.RemoveAll(c =>
-                        c.IsPersonal &&
-                        !activePersonalUids.Contains("USER_" + c.Id) &&
-                        !activePersonalUids.Contains(c.Id.ToString()) &&
-                        !personalEvents.Any(pe => pe.Title == c.Title && pe.Start == c.Start));
-                    if (removedPersonalCount > 0) hasChanges = true;
-
-                    // B. Dodawanie / aktualizacja zdarzeń osobistych
-                    foreach (var pe in personalEvents)
-                    {
-                        int parsedId = 0;
-                        if (!string.IsNullOrEmpty(pe.Uid) && pe.Uid.StartsWith("USER_") && int.TryParse(pe.Uid.Substring(5), out int pid))
-                            parsedId = pid;
-                        if (parsedId == 0) parsedId = Math.Abs(pe.Uid.GetHashCode());
-
-                        var existing = CustomEvents.FirstOrDefault(c => c.IsPersonal && (c.Id == parsedId || (c.Title == pe.Title && c.Start == pe.Start)));
-                        if (existing == null)
-                        {
-                            CustomEvents.Add(new Lesson
+                            // B. Dodawanie / aktualizacja zdarzeń grupy
+                            foreach (var ge in groupEvents)
                             {
-                                Id = parsedId,
-                                Title = pe.Title,
-                                Type = "WŁASNE",
-                                Start = pe.Start,
-                                End = pe.End,
-                                Place = string.IsNullOrWhiteSpace(pe.Place) ? "Brak miejsca" : pe.Place,
-                                Desc = pe.Desc,
-                                Group = "JA",
-                                Person = "Ja",
-                                IsHighPriority = pe.IsHighPriority,
-                                IsPersonal = true,
-                                OriginalStart = pe.OriginalStart != default ? pe.OriginalStart : pe.Start,
-                                OriginalEnd = pe.OriginalEnd != default ? pe.OriginalEnd : pe.End,
-                                OriginalPlace = pe.Place
-                            });
-                            hasChanges = true;
-                        }
-                        else
-                        {
-                            if (existing.Start != pe.Start || existing.End != pe.End || existing.Place != pe.Place || existing.Desc != pe.Desc || existing.IsHighPriority != pe.IsHighPriority)
-                            {
-                                existing.Start = pe.Start;
-                                existing.End = pe.End;
-                                existing.Place = string.IsNullOrWhiteSpace(pe.Place) ? "Brak miejsca" : pe.Place;
-                                existing.Desc = pe.Desc;
-                                existing.IsHighPriority = pe.IsHighPriority;
-                                hasChanges = true;
+                                if (ProcessGroupEvent(ge))
+                                {
+                                    hasChanges = true;
+                                }
                             }
                         }
                     }
-
-                    // C. Modyfikacje osobiste planu
-                    var personalMods = await _firebaseService.GetPersonalModificationsAsync<LessonModification>(userKey);
-                    foreach (var pmod in personalMods)
+                    catch (Exception ex)
                     {
-                        if (!_modifications.TryGetValue(pmod.LessonKey, out var existingMod))
+                        Console.WriteLine($"[ScheduleService] Błąd pobierania zdarzeń grupy: {ex.Message}");
+                    }
+                }
+
+                // 2. Synchronizacja osobistych wydarzeń i modyfikacji (Cross-Device Sync użytkownika)
+                string userKey = GetCurrentUserKey();
+                if (!string.IsNullOrEmpty(userKey))
+                {
+                    try
+                    {
+                        var personalEvents = await _firebaseService.GetPersonalEventsAsync(userKey);
+                        var personalMods = await _firebaseService.GetPersonalModificationsAsync<LessonModification>(userKey);
+
+                        lock (_collectionsLock)
                         {
-                            _modifications[pmod.LessonKey] = pmod;
-                            hasChanges = true;
-                        }
-                        else
-                        {
-                            if (existingMod.IsCanceled != pmod.IsCanceled || existingMod.CancelReason != pmod.CancelReason ||
-                                existingMod.ModifiedStart != pmod.ModifiedStart || existingMod.ModifiedEnd != pmod.ModifiedEnd ||
-                                existingMod.ModifiedPlace != pmod.ModifiedPlace || existingMod.HasExam != pmod.HasExam ||
-                                existingMod.HasTask != pmod.HasTask || existingMod.TaskDetails != pmod.TaskDetails)
+                            // A. Usuwanie zdarzeń osobistych usuniętych na innym urządzeniu
+                            var activePersonalUids = new HashSet<string>(personalEvents.Select(p => p.Uid), StringComparer.OrdinalIgnoreCase);
+                            int removedPersonalCount = CustomEvents.RemoveAll(c =>
+                                c.IsPersonal &&
+                                !activePersonalUids.Contains("USER_" + c.Id) &&
+                                !activePersonalUids.Contains(c.Id.ToString()) &&
+                                !personalEvents.Any(pe => pe.Title == c.Title && pe.Start == c.Start));
+                            if (removedPersonalCount > 0) hasChanges = true;
+
+                            // B. Dodawanie / aktualizacja zdarzeń osobistych
+                            foreach (var pe in personalEvents)
                             {
-                                existingMod.IsCanceled = pmod.IsCanceled;
-                                existingMod.CancelReason = pmod.CancelReason;
-                                existingMod.ModifiedStart = pmod.ModifiedStart;
-                                existingMod.ModifiedEnd = pmod.ModifiedEnd;
-                                existingMod.ModifiedPlace = pmod.ModifiedPlace;
-                                existingMod.HasExam = pmod.HasExam;
-                                existingMod.HasTask = pmod.HasTask;
-                                existingMod.TaskDetails = pmod.TaskDetails;
-                                hasChanges = true;
+                                int parsedId = 0;
+                                if (!string.IsNullOrEmpty(pe.Uid) && pe.Uid.StartsWith("USER_") && int.TryParse(pe.Uid.Substring(5), out int pid))
+                                    parsedId = pid;
+                                if (parsedId == 0) parsedId = Math.Abs(pe.Uid.GetHashCode());
+
+                                var existing = CustomEvents.FirstOrDefault(c => c.IsPersonal && (c.Id == parsedId || (c.Title == pe.Title && c.Start == pe.Start)));
+                                if (existing == null)
+                                {
+                                    CustomEvents.Add(new Lesson
+                                    {
+                                        Id = parsedId,
+                                        Title = pe.Title,
+                                        Type = "WŁASNE",
+                                        Start = pe.Start,
+                                        End = pe.End,
+                                        Place = string.IsNullOrWhiteSpace(pe.Place) ? "Brak miejsca" : pe.Place,
+                                        Desc = pe.Desc,
+                                        Group = "JA",
+                                        Person = "Ja",
+                                        IsHighPriority = pe.IsHighPriority,
+                                        IsPersonal = true,
+                                        OriginalStart = pe.OriginalStart != default ? pe.OriginalStart : pe.Start,
+                                        OriginalEnd = pe.OriginalEnd != default ? pe.OriginalEnd : pe.End,
+                                        OriginalPlace = pe.Place
+                                    });
+                                    hasChanges = true;
+                                }
+                                else
+                                {
+                                    if (existing.Start != pe.Start || existing.End != pe.End || existing.Place != pe.Place || existing.Desc != pe.Desc || existing.IsHighPriority != pe.IsHighPriority)
+                                    {
+                                        existing.Start = pe.Start;
+                                        existing.End = pe.End;
+                                        existing.Place = string.IsNullOrWhiteSpace(pe.Place) ? "Brak miejsca" : pe.Place;
+                                        existing.Desc = pe.Desc;
+                                        existing.IsHighPriority = pe.IsHighPriority;
+                                        hasChanges = true;
+                                    }
+                                }
+                            }
+
+                            // C. Modyfikacje osobiste planu
+                            foreach (var pmod in personalMods)
+                            {
+                                if (!_modifications.TryGetValue(pmod.LessonKey, out var existingMod))
+                                {
+                                    _modifications[pmod.LessonKey] = pmod;
+                                    hasChanges = true;
+                                }
+                                else
+                                {
+                                    if (existingMod.IsCanceled != pmod.IsCanceled || existingMod.CancelReason != pmod.CancelReason ||
+                                        existingMod.ModifiedStart != pmod.ModifiedStart || existingMod.ModifiedEnd != pmod.ModifiedEnd ||
+                                        existingMod.ModifiedPlace != pmod.ModifiedPlace || existingMod.HasExam != pmod.HasExam ||
+                                        existingMod.HasTask != pmod.HasTask || existingMod.TaskDetails != pmod.TaskDetails)
+                                    {
+                                        existingMod.IsCanceled = pmod.IsCanceled;
+                                        existingMod.CancelReason = pmod.CancelReason;
+                                        existingMod.ModifiedStart = pmod.ModifiedStart;
+                                        existingMod.ModifiedEnd = pmod.ModifiedEnd;
+                                        existingMod.ModifiedPlace = pmod.ModifiedPlace;
+                                        existingMod.HasExam = pmod.HasExam;
+                                        existingMod.HasTask = pmod.HasTask;
+                                        existingMod.TaskDetails = pmod.TaskDetails;
+                                        hasChanges = true;
+                                    }
+                                }
                             }
                         }
                     }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ScheduleService] Błąd pobierania danych osobistych użytkownika: {ex.Message}");
+                    }
                 }
-                catch (Exception ex)
+
+                if (hasChanges)
                 {
-                    Console.WriteLine($"[ScheduleService] Błąd pobierania danych osobistych użytkownika: {ex.Message}");
+                    List<Lesson> reminderSnapshot;
+                    lock (_collectionsLock)
+                    {
+                        ApplyModifications(_lessons);
+                        reminderSnapshot = _lessons.ToList();
+                    }
+                    SaveModificationsToDisk();
+                    SaveCustomEventsToDisk();
+                    SaveCacheToDisk();
+                    _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(reminderSnapshot);
+                    OnScheduleLoaded?.Invoke();
                 }
             }
-
-            if (hasChanges)
+            finally
             {
-                ApplyModifications(_lessons);
-                SaveModificationsToDisk();
-                SaveCustomEventsToDisk();
-                SaveCacheToDisk();
-                _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(_lessons);
-                OnScheduleLoaded?.Invoke();
+                Interlocked.Exchange(ref _isCloudSyncing, 0);
             }
         }
 
@@ -1436,10 +1585,13 @@ namespace Portal_Studenta.Services
                 if (godMode)
                 {
                     // God Mode zapisujemy w ODDZIELNEJ liście - NIGDY nie skażamy planu osobistego ani cache dyskowego!
-                    ApplyModifications(newLessons);
-                    _godModeLessons = newLessons.OrderBy(l => l.Start).ToList();
-                    _lastGodModeFetchTime = DateTime.UtcNow;
-                    IsLoaded = true;
+                    lock (_collectionsLock)
+                    {
+                        ApplyModifications(newLessons);
+                        _godModeLessons = newLessons.OrderBy(l => l.Start).ToList();
+                        _lastGodModeFetchTime = DateTime.UtcNow;
+                        IsLoaded = true;
+                    }
                     OnScheduleLoaded?.Invoke();
                 }
                 else
@@ -1447,19 +1599,24 @@ namespace Portal_Studenta.Services
                     // 5. Scalanie z istniejącym cache dla planu osobistego:
                     // Zastępujemy lekcje w pobranym przedziale dat, zachowujemy resztę tygodni
                     var windowEnd = start.AddDays(days);
-                    var existingOutsideWindow = _lessons.Where(l => l.Start < start || l.Start >= windowEnd).ToList();
-                    var merged = existingOutsideWindow.Concat(newLessons).OrderBy(l => l.Start).ToList();
+                    List<Lesson> reminderSnapshot;
+                    lock (_collectionsLock)
+                    {
+                        var existingOutsideWindow = _lessons.Where(l => l.Start < start || l.Start >= windowEnd).ToList();
+                        var merged = existingOutsideWindow.Concat(newLessons).OrderBy(l => l.Start).ToList();
 
-                    int assignedId = 1;
-                    foreach (var l in merged) l.Id = assignedId++;
+                        int assignedId = 1;
+                        foreach (var l in merged) l.Id = assignedId++;
 
-                    ApplyModifications(merged);
+                        ApplyModifications(merged);
 
-                    _lessons = merged;
+                        _lessons = merged;
+                        IsLoaded = true;
+                        LastUsosFetchTime = DateTime.UtcNow;
+                        reminderSnapshot = _lessons.ToList();
+                    }
                     SaveCacheToDisk();
-                    IsLoaded = true;
-                    LastUsosFetchTime = DateTime.UtcNow;
-                    _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(_lessons);
+                    _ = _notificationService?.ScheduleUpcomingClassRemindersAsync(reminderSnapshot);
                     OnScheduleLoaded?.Invoke();
                 }
             }
@@ -1551,17 +1708,23 @@ namespace Portal_Studenta.Services
 
         public List<Lesson> GetPreparedData(bool godMode = false)
         {
-            if (godMode && _godModeLessons.Any())
+            lock (_collectionsLock)
             {
-                return _godModeLessons.ToList();
+                if (godMode && _godModeLessons.Any())
+                {
+                    return _godModeLessons.ToList();
+                }
+                return _lessons.ToList();
             }
-            return _lessons.ToList();
         }
 
         public List<Lesson> GetAllEvents(bool godMode = false)
         {
-            var baseList = (godMode && _godModeLessons.Any()) ? _godModeLessons : _lessons;
-            return baseList.Concat(CustomEvents).OrderBy(l => l.Start).ToList();
+            lock (_collectionsLock)
+            {
+                var baseList = (godMode && _godModeLessons.Any()) ? _godModeLessons : _lessons;
+                return baseList.Concat(CustomEvents).OrderBy(l => l.Start).ToList();
+            }
         }
     }
 }

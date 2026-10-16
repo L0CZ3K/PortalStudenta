@@ -42,7 +42,21 @@
         ScheduleService.OnScheduleLoaded += HandleScheduleLoaded;
         Refresh();
         _timer = new System.Timers.Timer(10000);
-        _timer.Elapsed += async (s, e) => await InvokeAsync(() => { Refresh(); StateHasChanged(); });
+        _timer.Elapsed += async (s, e) =>
+        {
+            try
+            {
+                await InvokeAsync(() =>
+                {
+                    Refresh();
+                    StateHasChanged();
+                });
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[LiveCountdown] Timer error: {ex.Message}");
+            }
+        };
         _timer.Start();
     }
 
@@ -57,23 +71,28 @@
 
     private void Refresh()
     {
-        var data = ScheduleService.GetPreparedData().Concat(ScheduleService.CustomEvents).ToList();
+        var data = ScheduleService.GetAllEvents();
         var now = DateTime.Now;
         OngoingEvent = data.FirstOrDefault(e => !e.IsCanceled && e.Start <= now && e.End > now);
         UpcomingEvent = data.Where(e => !e.IsCanceled && e.Start > now && e.Start.Date == now.Date)
                             .OrderBy(e => e.Start).FirstOrDefault();
     }
 
-    private string GetCountdownText() =>
-        (UpcomingEvent!.Start - DateTime.Now).TotalMinutes < 60
-        ? $"Za {Math.Floor((UpcomingEvent.Start - DateTime.Now).TotalMinutes)} min"
-        : UpcomingEvent.Start.ToString("HH:mm");
+    private string GetCountdownText()
+    {
+        if (UpcomingEvent == null) return string.Empty;
+        return (UpcomingEvent.Start - DateTime.Now).TotalMinutes < 60
+            ? $"Za {Math.Floor((UpcomingEvent.Start - DateTime.Now).TotalMinutes)} min"
+            : UpcomingEvent.Start.ToString("HH:mm");
+    }
 
-    private string GetColor(Lesson l) => l.IsHighPriority ? "color-danger" : $"color-{l.Type.ToLower()}";
+    private string GetColor(Lesson l) => l.IsHighPriority ? "color-danger" : $"color-{(l.Type ?? "event").ToLowerInvariant()}";
 
     public void Dispose()
     {
         ScheduleService.OnScheduleLoaded -= HandleScheduleLoaded;
+        _timer?.Stop();
         _timer?.Dispose();
+        _timer = null;
     }
 }

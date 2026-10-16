@@ -20,15 +20,68 @@ namespace Portal_Studenta.Services
             _httpClient = new HttpClient();
         }
 
+        private static readonly byte[] FallbackEntropy = SHA256.HashData(Encoding.UTF8.GetBytes("UniAvio_OAuth_Fallback_Key_v1_" + Environment.MachineName));
+
+        private static string ProtectForFallback(string plainText)
+        {
+            try
+            {
+                using var aes = Aes.Create();
+                aes.Key = FallbackEntropy;
+                aes.GenerateIV();
+                using var encryptor = aes.CreateEncryptor(aes.Key, aes.IV);
+                var plainBytes = Encoding.UTF8.GetBytes(plainText);
+                var cipherBytes = encryptor.TransformFinalBlock(plainBytes, 0, plainBytes.Length);
+                var combined = new byte[aes.IV.Length + cipherBytes.Length];
+                Buffer.BlockCopy(aes.IV, 0, combined, 0, aes.IV.Length);
+                Buffer.BlockCopy(cipherBytes, 0, combined, aes.IV.Length, cipherBytes.Length);
+                return "ENC:" + Convert.ToBase64String(combined);
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static string? UnprotectFromFallback(string? stored)
+        {
+            if (string.IsNullOrEmpty(stored)) return null;
+            if (!stored.StartsWith("ENC:", StringComparison.Ordinal)) return stored;
+            try
+            {
+                var raw = Convert.FromBase64String(stored.Substring(4));
+                using var aes = Aes.Create();
+                aes.Key = FallbackEntropy;
+                var ivLen = aes.BlockSize / 8;
+                if (raw.Length <= ivLen) return null;
+                var iv = new byte[ivLen];
+                var cipher = new byte[raw.Length - ivLen];
+                Buffer.BlockCopy(raw, 0, iv, 0, ivLen);
+                Buffer.BlockCopy(raw, ivLen, cipher, 0, cipher.Length);
+                using var decryptor = aes.CreateDecryptor(aes.Key, iv);
+                var plainBytes = decryptor.TransformFinalBlock(cipher, 0, cipher.Length);
+                return Encoding.UTF8.GetString(plainBytes);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         public static async Task SetTokenAsync(string key, string value)
         {
             try
             {
                 await SecureStorage.SetAsync(key, value);
             }
-            catch
+            catch (Exception ex)
             {
-                Preferences.Default.Set(key, value);
+                System.Diagnostics.Debug.WriteLine($"[UsosAuthService] SecureStorage unavailable for {key}, using encrypted fallback ({ex.GetType().Name}).");
+                var encrypted = ProtectForFallback(value);
+                if (!string.IsNullOrEmpty(encrypted))
+                {
+                    Preferences.Default.Set(key, encrypted);
+                }
             }
         }
 
@@ -39,15 +92,20 @@ namespace Portal_Studenta.Services
                 var val = await SecureStorage.GetAsync(key);
                 if (!string.IsNullOrEmpty(val)) return val;
             }
-            catch { }
-            return Preferences.Default.Get<string?>(key, null);
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UsosAuthService] SecureStorage read fallback for {key}: {ex.GetType().Name}");
+            }
+            var rawPref = Preferences.Default.Get<string?>(key, null);
+            return UnprotectFromFallback(rawPref);
         }
 
         public static event Action? OnSessionExpired;
 
         public static void RemoveToken(string key)
         {
-            try { SecureStorage.Remove(key); } catch { }
+            try { SecureStorage.Remove(key); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[UsosAuthService] RemoveToken {key}: {ex.GetType().Name}"); }
             Preferences.Default.Remove(key);
         }
 
@@ -176,12 +234,12 @@ namespace Portal_Studenta.Services
                     Console.WriteLine($"[UsosAuthService] WebAuthenticator błąd ({authEx.Message}), próba przez wbudowany WebView...");
                     verifier = await AuthenticateViaWebViewAsync(authUrl, CallbackUrl);
                 }
+#endif
 
                 if (string.IsNullOrWhiteSpace(verifier))
                 {
                     throw new Exception("Nie znaleziono parametru 'oauth_verifier' w odpowiedzi serwera USOS.");
                 }
-#endif
 
                 // 3. Wymień Request Token na Access Token
                 var (accessToken, accessTokenSecret) = await GetAccessTokenAsync(requestToken, requestTokenSecret, verifier);
@@ -309,7 +367,15 @@ namespace Portal_Studenta.Services
                         }
                     };
 
-                    await Application.Current!.Windows[0].Page!.Navigation.PushModalAsync(page);
+                    var nav = Application.Current?.Windows.FirstOrDefault()?.Page?.Navigation;
+                    if (nav != null)
+                    {
+                        await nav.PushModalAsync(page);
+                    }
+                    else
+                    {
+                        tcs.TrySetException(new InvalidOperationException("Brak aktywnego okna nawigacji dla autoryzacji USOS."));
+                    }
                 }
                 catch (Exception ex)
                 {

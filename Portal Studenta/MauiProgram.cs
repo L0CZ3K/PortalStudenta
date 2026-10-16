@@ -35,9 +35,6 @@ namespace Portal_Studenta
             builder.Services.AddSingleton<Portal_Studenta.Platforms.MacCatalyst.MacMenuBarService>();
 #endif
 
-            // Transient or Scoped services if needed
-            // builder.Services.AddTransient<MyTransientService>();
-
 #if DEBUG
             builder.Services.AddBlazorWebViewDeveloperTools();
             builder.Logging.AddDebug();
