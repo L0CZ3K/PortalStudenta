@@ -41,7 +41,7 @@ jobs:
             -c Release \
             -p:CreatePackage=false \
             -p:ValidateXcodeVersion=false \
-            -p:MtouchLink=Full
+            -p:PublishTrimmed=false
 
       - name: Package macOS App into Zip
         run: |
@@ -94,7 +94,10 @@ jobs:
             -p:AndroidSigningKeyStore="${{ github.workspace }}/release.keystore" \
             -p:AndroidSigningKeyAlias=uniavio \
             -p:AndroidSigningKeyPass=uniavio123 \
-            -p:AndroidSigningStorePass=uniavio123
+            -p:AndroidSigningStorePass=uniavio123 \
+            -p:PublishTrimmed=false \
+            -p:RunAOTCompilation=false \
+            -p:AndroidLinkMode=None
 
       - name: Locate and Rename Signed APK
         run: |

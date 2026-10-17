@@ -12,6 +12,16 @@ namespace Portal_Studenta
             CultureInfo.DefaultThreadCurrentUICulture = culture;
 
             InitializeComponent();
+
+            AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            {
+                System.Diagnostics.Debug.WriteLine($"[CRITICAL UNHANDLED EXCEPTION] {e.ExceptionObject}");
+            };
+            TaskScheduler.UnobservedTaskException += (s, e) =>
+            {
+                System.Diagnostics.Debug.WriteLine($"[CRITICAL UNOBSERVED TASK EXCEPTION] {e.Exception}");
+                e.SetObserved();
+            };
         }
 
         protected override Window CreateWindow(IActivationState? activationState)

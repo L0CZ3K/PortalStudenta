@@ -72,7 +72,13 @@ namespace Portal_Studenta.Services
         {
             try
             {
-                await SecureStorage.SetAsync(key, value);
+                var setTask = SecureStorage.SetAsync(key, value);
+                if (await Task.WhenAny(setTask, Task.Delay(2000)) != setTask)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[UsosAuthService] SecureStorage write timed out for {key}, falling back to Preferences.");
+                    throw new TimeoutException("SecureStorage write timed out.");
+                }
+                await setTask;
             }
             catch (Exception ex)
             {
@@ -89,8 +95,16 @@ namespace Portal_Studenta.Services
         {
             try
             {
-                var val = await SecureStorage.GetAsync(key);
-                if (!string.IsNullOrEmpty(val)) return val;
+                var getTask = SecureStorage.GetAsync(key);
+                if (await Task.WhenAny(getTask, Task.Delay(1500)) == getTask)
+                {
+                    var val = await getTask;
+                    if (!string.IsNullOrEmpty(val)) return val;
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[UsosAuthService] SecureStorage read timed out for {key}, falling back to Preferences.");
+                }
             }
             catch (Exception ex)
             {

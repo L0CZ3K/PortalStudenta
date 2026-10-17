@@ -35,8 +35,8 @@ namespace Portal_Studenta
             builder.Services.AddSingleton<Portal_Studenta.Platforms.MacCatalyst.MacMenuBarService>();
 #endif
 
-#if DEBUG
             builder.Services.AddBlazorWebViewDeveloperTools();
+#if DEBUG
             builder.Logging.AddDebug();
 #endif
 
